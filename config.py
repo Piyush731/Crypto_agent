@@ -15,14 +15,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
-# ╔═══════════════════════════════════════════════════════════╗
-# ║  PROJECT PATHS                                            ║
-# ╚═══════════════════════════════════════════════════════════╝
-
 BASE_DIR = Path(__file__).parent
 SAVED_MODELS_DIR = BASE_DIR / "saved_models"
 DATA_CACHE_DIR = BASE_DIR / "cache"
+CACHE_DIR = DATA_CACHE_DIR 
 LOGS_DIR = BASE_DIR / "logs"
 DB_PATH = BASE_DIR / "agent.db"
 
@@ -50,17 +46,6 @@ TRADING_PAIRS = [
 PRIMARY_PAIR = "BTCUSDT"
 
 REFERENCE_ASSETS = ["BTCUSDT", "ETHUSDT"]
-
-
-# ╔═══════════════════════════════════════════════════════════╗
-# ║  TIMEFRAMES                                                ║
-# ║  Multi-timeframe analysis for better accuracy              ║
-# ║                                                            ║
-# ║  Strategy:                                                 ║
-# ║    macro (1d)  → Identify the TREND                       ║
-# ║    swing (4h)  → Identify the SETUP                       ║
-# ║    entry (1h)  → Time the ENTRY                           ║
-# ╚═══════════════════════════════════════════════════════════╝
 
 TIMEFRAMES = {
     "entry": "1h",           # Entry timing
@@ -90,10 +75,6 @@ PREDICTION_HORIZONS = {
 # Active horizon for predictions
 ACTIVE_HORIZON = "short_swing"
 
-
-# ╔═══════════════════════════════════════════════════════════╗
-# ║  FEATURE ENGINEERING                                       ║
-# ╚═══════════════════════════════════════════════════════════╝
 
 FEATURE_CONFIG = {
     # ── Technical Indicators ──
@@ -129,10 +110,6 @@ FEATURE_CONFIG = {
     "min_feature_importance": 0.001,
 }
 
-
-# ╔═══════════════════════════════════════════════════════════╗
-# ║  ML MODELS                                                ║
-# ╚═══════════════════════════════════════════════════════════╝
 
 MODEL_CONFIG = {
     # Data split
@@ -204,10 +181,6 @@ MODEL_CONFIG = {
 }
 
 
-# ╔═══════════════════════════════════════════════════════════╗
-# ║  AI BRAIN (HuggingFace Free Inference)                     ║
-# ╚═══════════════════════════════════════════════════════════╝
-
 AI_CONFIG = {
     "enabled": bool(HF_TOKEN),
 
@@ -232,12 +205,6 @@ AI_CONFIG = {
     "timeout_seconds": 30,
 }
 
-
-# ╔═══════════════════════════════════════════════════════════╗
-# ║  RISK MANAGEMENT                                          ║
-# ║  THIS IS THE MOST IMPORTANT CONFIG                        ║
-# ║  These settings PROTECT your capital                       ║
-# ╚═══════════════════════════════════════════════════════════╝
 
 RISK_CONFIG = {
     # Position sizing
@@ -266,10 +233,6 @@ RISK_CONFIG = {
 }
 
 
-# ╔═══════════════════════════════════════════════════════════╗
-# ║  BACKTESTING                                               ║
-# ╚═══════════════════════════════════════════════════════════╝
-
 BACKTEST_CONFIG = {
     "initial_capital": 10000,
     "commission_pct": 0.04,          # Binance futures taker fee
@@ -281,9 +244,6 @@ BACKTEST_CONFIG = {
 }
 
 
-# ╔═══════════════════════════════════════════════════════════╗
-# ║  NEWS & SENTIMENT                                         ║
-# ╚═══════════════════════════════════════════════════════════╝
 
 SENTIMENT_CONFIG = {
     "max_headlines": 30,
@@ -308,11 +268,6 @@ SENTIMENT_CONFIG = {
 }
 
 
-# ╔═══════════════════════════════════════════════════════════╗
-# ║  SIGNAL ENGINE WEIGHTS                                     ║
-# ║  How much each component contributes to final signal       ║
-# ╚═══════════════════════════════════════════════════════════╝
-
 SIGNAL_WEIGHTS = {
     "ml_ensemble": 0.45,      # ML models = 45%
     "sentiment": 0.15,        # News sentiment = 15%
@@ -324,10 +279,6 @@ SIGNAL_WEIGHTS = {
 assert abs(sum(SIGNAL_WEIGHTS.values()) - 1.0) < 0.01, "Signal weights must sum to 1.0!"
 
 
-# ╔═══════════════════════════════════════════════════════════╗
-# ║  TELEGRAM NOTIFICATIONS                                    ║
-# ╚═══════════════════════════════════════════════════════════╝
-
 TELEGRAM_CONFIG = {
     "enabled": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID),
     "send_signals": True,            # Send trade signals
@@ -338,9 +289,6 @@ TELEGRAM_CONFIG = {
 }
 
 
-# ╔═══════════════════════════════════════════════════════════╗
-# ║  SCHEDULING                                                ║
-# ╚═══════════════════════════════════════════════════════════╝
 
 SCHEDULE_CONFIG = {
     "analysis_interval_minutes": 60,    # Full analysis every hour
@@ -350,9 +298,6 @@ SCHEDULE_CONFIG = {
 }
 
 
-# ╔═══════════════════════════════════════════════════════════╗
-# ║  LOGGING                                                   ║
-# ╚═══════════════════════════════════════════════════════════╝
 
 LOG_CONFIG = {
     "level": "INFO",                 # DEBUG | INFO | WARNING | ERROR
@@ -365,10 +310,6 @@ LOG_CONFIG = {
     "date_format": "%Y-%m-%d %H:%M:%S",
 }
 
-
-# ╔═══════════════════════════════════════════════════════════╗
-# ║  BINANCE API ENDPOINTS (public, no keys needed)            ║
-# ╚═══════════════════════════════════════════════════════════╝
 
 BINANCE_CONFIG = {
     # Futures endpoints (public data - no API key required)
@@ -390,10 +331,6 @@ BINANCE_CONFIG = {
     "use_testnet": True,             # Always testnet until confident
 }
 
-
-# ╔═══════════════════════════════════════════════════════════╗
-# ║  VALIDATION - Catches config errors on import             ║
-# ╚═══════════════════════════════════════════════════════════╝
 
 def validate_config():
     """Run on import to catch config errors early."""
