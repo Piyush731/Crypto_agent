@@ -185,24 +185,27 @@ AI_CONFIG = {
     "enabled": bool(HF_TOKEN),
 
     # Three AI "experts" for reasoning
+    # Uses HF Router API (chat/completions format)
     "models": {
-        "analyst": "mistralai/Mistral-7B-Instruct-v0.3",
-        "strategist": "mistralai/Mixtral-8x7B-Instruct-v0.1",
-        "risk_manager": "microsoft/Phi-3-mini-4k-instruct",
+        "analyst": "Qwen/Qwen3-8B",
+        "strategist": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+        "risk_manager": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
     },
 
     # Fallback models if primary ones are busy/rate-limited
     "fallback_models": [
-        "google/gemma-2-2b-it",
-        "HuggingFaceH4/zephyr-7b-beta",
-        "tiiuae/falcon-7b-instruct",
+        "Qwen/Qwen3-14B",
+        "meta-llama/Llama-3.3-70B-Instruct",
+        "Qwen/Qwen2.5-72B-Instruct",
+        "meta-llama/Llama-3.1-8B-Instruct",
+        "meta-llama/Llama-3.2-3B-Instruct",
     ],
 
     "max_new_tokens": 500,
-    "temperature": 0.3,
+    "temperature": 0.6,          # DeepSeek R1 recommends 0.5-0.7
     "retry_attempts": 3,
     "retry_delay_seconds": 5,
-    "timeout_seconds": 30,
+    "timeout_seconds": 45,
 }
 
 

@@ -1,0 +1,18 @@
+{
+  "symbol": "BNBUSDT",
+  "trained_at": "2026-03-08T11:37:56.881009",
+  "horizon": "short_swing",
+  "samples": 494,
+  "features": 149,
+  "test_accuracy": 0.6465,
+  "test_f1": 0.3137,
+  "test_roc_auc": 0.5797,
+  "cv_accuracy": 0.6738,
+  "cv_f1": 0.5627,
+  "models_trained": [
+    "random_forest",
+    "xgboost",
+    "gradient_boosting",
+    "extra_trees"
+  ]
+}

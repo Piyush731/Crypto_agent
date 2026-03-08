@@ -1,0 +1,18 @@
+{
+  "symbol": "BTCUSDT",
+  "trained_at": "2026-03-08T12:04:24.875300",
+  "horizon": "short_swing",
+  "samples": 494,
+  "features": 139,
+  "test_accuracy": 0.7374,
+  "test_f1": 0.2353,
+  "test_roc_auc": 0.614,
+  "cv_accuracy": 0.6831,
+  "cv_f1": 0.5131,
+  "models_trained": [
+    "random_forest",
+    "xgboost",
+    "gradient_boosting",
+    "extra_trees"
+  ]
+}
