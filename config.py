@@ -40,7 +40,7 @@ TRADING_PAIRS = [
     "ETHUSDT",
     "SOLUSDT",
     "BNBUSDT",
-    "XRPUSDT",
+    # "XRPUSDT",
 ]
 
 PRIMARY_PAIR = "BTCUSDT"
@@ -218,10 +218,10 @@ RISK_CONFIG = {
 
     # Stop-loss / Take-profit (as % from entry)
     "default_stop_loss_pct": 2.0,
-    "default_take_profit_pct": 4.0,  # 2:1 reward-to-risk
+    "default_take_profit_pct": 3.0,  # 2:1 reward-to-risk
     "use_atr_stops": True,           # Dynamic SL based on ATR
     "atr_stop_multiplier": 2.0,     # SL = entry ± (ATR × 2)
-    "trailing_stop_pct": 1.5,
+    "trailing_stop_pct": 3.5,
 
     # Circuit breakers
     "max_daily_loss_pct": 5.0,       # Pause trading if daily loss > 5%
@@ -231,7 +231,7 @@ RISK_CONFIG = {
     "max_consecutive_losses": 5,     # Pause after 5 losses in a row
 
     # Confidence filters
-    "min_confidence_to_trade": 0.58, # Only trade if confidence > 58%
+    "min_confidence_to_trade": 0.35, # Only trade if confidence > 58%  chngx to 65
     "min_agreement_to_trade": 0.60,  # Only trade if 60%+ models agree
 }
 

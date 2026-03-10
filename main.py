@@ -827,6 +827,20 @@ def action_paper():
             print(f"     AI:       {'on' if include_ai else 'off'}")
             print(f"\n     Press {C.BOLD}Ctrl+C{C.RESET} to stop\n")
 
+            # if not _ask_yn("Start now?"):
+            #     return
+
+            # if config.TELEGRAM_CONFIG["enabled"]:
+            #     _get("telegram").send_startup(
+            #         "paper",
+            #         config.BACKTEST_CONFIG["initial_capital"],
+            #         config.TRADING_PAIRS,
+            #     )
+
+            # paper.start()  # blocks until Ctrl+C or max_cycles
+
+            # st = paper.get_status()   old code before teh bot commadnwas introduced telgram bot cammads okay .
+
             if not _ask_yn("Start now?"):
                 return
 
@@ -837,7 +851,21 @@ def action_paper():
                     config.TRADING_PAIRS,
                 )
 
+            # Start Telegram command bot for remote monitoring
+            cmd_bot = None
+            if config.TELEGRAM_CONFIG["enabled"]:
+                try:
+                    from notifications.telegram_bot import TelegramCommandBot
+                    cmd_bot = TelegramCommandBot()
+                    cmd_bot.start()
+                    print(f"  📱 Telegram commands active: /help /status /positions /trades")
+                except Exception as e:
+                    logger.warning(f"Telegram command bot not available: {e}")
+
             paper.start()  # blocks until Ctrl+C or max_cycles
+
+            if cmd_bot:
+                cmd_bot.stop()
 
             st = paper.get_status()
             print(f"\n  Paper trading stopped.")
@@ -1273,7 +1301,10 @@ def action_trades():
         losses = 0
         for t in trades:
             sy = t.get("symbol", "?")
-            d  = t.get("direction", "?")
+            d_raw = t.get("direction", "?")
+            d = "LONG" if str(d_raw) in ("1", "LONG") else (
+                "SHORT" if str(d_raw) in ("-1", "SHORT") else str(d_raw)
+            )
             ep = t.get("entry_price", 0)
             xp = t.get("exit_price")
             pn = t.get("pnl_usd", 0) or 0
@@ -1547,6 +1578,19 @@ def _run_cli(args):
             print(f"  {C.RED}❌ {e}{C.RESET}")
         return True
 
+    # if args.paper:
+    #     include_ai = config.AI_CONFIG["enabled"] and not no_ai
+    #     print(f"\n  🚀 Starting paper trading (Ctrl+C to stop) ...")
+    #     try:
+    #         paper = _new_paper_trader(include_ai)
+    #         if config.TELEGRAM_CONFIG["enabled"]:
+    #             _get("telegram").send_startup(
+    #                 "paper",
+    #                 config.BACKTEST_CONFIG["initial_capital"],
+    #                 config.TRADING_PAIRS,
+    #             )
+    #         paper.start()
+    #         st = paper.get_status()
     if args.paper:
         include_ai = config.AI_CONFIG["enabled"] and not no_ai
         print(f"\n  🚀 Starting paper trading (Ctrl+C to stop) ...")
@@ -1558,8 +1602,24 @@ def _run_cli(args):
                     config.BACKTEST_CONFIG["initial_capital"],
                     config.TRADING_PAIRS,
                 )
+
+            # Start Telegram command bot for remote monitoring
+            cmd_bot = None
+            if config.TELEGRAM_CONFIG["enabled"]:
+                try:
+                    from notifications.telegram_bot import TelegramCommandBot
+                    cmd_bot = TelegramCommandBot()
+                    cmd_bot.start()
+                except Exception as e:
+                    logger.warning(f"Telegram command bot: {e}")
+
             paper.start()
+
+            if cmd_bot:
+                cmd_bot.stop()
+
             st = paper.get_status()
+            
             print(f"\n  Stopped. Capital: ${st.get('capital',0):,.2f}, "
                   f"P&L: {_pnl(st.get('pnl',0))}")
             if config.TELEGRAM_CONFIG["enabled"]:

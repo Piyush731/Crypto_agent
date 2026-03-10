@@ -1,12 +1,4 @@
 """
-Crypto Futures AI Agent v3.0 — Main Entry Point
-================================================
-Interactive CLI + command-line interface for all agent operations.
-
-Phase 1: Backtest + Paper Trading + Telegram Signals
-Phase 2: Paper Trading Optimization  
-Phase 3: Live Trading (future)
-
 Usage:
     python main.py                     # Interactive menu
     python main.py --status            # System health check
