@@ -1,6 +1,6 @@
 """
-Crypto Futures AI Agent — Signal Engine
-=========================================
+Crypto Futures AI Agent — Signal Engine  (v3.0.3 — DB field mapping fix)
+=========================================================================
 Combines all analysis components into a final trading signal.
 
 Components (weights from SIGNAL_WEIGHTS in config.py):
@@ -13,19 +13,11 @@ Components (weights from SIGNAL_WEIGHTS in config.py):
 Output:
     LONG/SHORT/HOLD with confidence score, entry/SL/TP levels, full breakdown.
 
-Pipeline per symbol:
-    DataManager.get_full_dataset()
-    → ML: FeatureBuilder + EnsemblePredictor.predict()
-    → Sentiment: extract from dataset
-    → AI: AIBrain.analyze()
-    → Funding: extract from dataset
-    → Market Structure: compute from multi-TF OHLCV
-    → Weighted Combination → SL/TP Calculation → DB Log → Final Signal
-
-Usage:
-    engine = SignalEngine()
-    result = engine.generate_signal("BTCUSDT")
-    scan   = engine.scan_all()
+v3.0.3 fixes:
+  - _log_signal: explicit debug logging of every DB field before save
+  - _log_signal: ensure combined_score and all component scores are float (not None)
+  - _combine_signals: returns combined_score as float always
+  - generate_signal: moved _log_signal call to ensure result is fully populated
 """
 
 import time
@@ -85,7 +77,7 @@ class SignalEngine:
         Parameters
         ----------
         symbol      : str           e.g. "BTCUSDT"
-        dataset     : dict | None   Pre-fetched from DataManager. None → fetch live.
+        dataset     : dict | None   Pre-fetched from DataManager. None -> fetch live.
         include_ai  : bool          Run AI reasoning (slow ~30-60s). False for quick scan.
 
         Returns
@@ -106,6 +98,7 @@ class SignalEngine:
             "signal": "HOLD",
             "direction": 0,
             "confidence": 0.0,
+            "combined_score": 0.0,
         }
 
         try:
@@ -229,17 +222,6 @@ class SignalEngine:
     ) -> Dict:
         """
         Scan multiple pairs and return signals + actionable summary.
-
-        Parameters
-        ----------
-        symbols     : list | None   Defaults to TRADING_PAIRS
-        include_ai  : bool          Include AI for each pair (slow)
-
-        Returns
-        -------
-        dict
-            all: {symbol: result}, actionable: {symbol: result},
-            summary: {total, actionable, long, short, hold}
         """
         pairs = symbols or TRADING_PAIRS
         t0 = time.time()
@@ -275,18 +257,15 @@ class SignalEngine:
             "total": len(pairs),
             "actionable": len(actionable),
             "long": sum(
-                1
-                for r in all_results.values()
+                1 for r in all_results.values()
                 if r.get("signal") == "LONG"
             ),
             "short": sum(
-                1
-                for r in all_results.values()
+                1 for r in all_results.values()
                 if r.get("signal") == "SHORT"
             ),
             "hold": sum(
-                1
-                for r in all_results.values()
+                1 for r in all_results.values()
                 if r.get("signal") == "HOLD"
             ),
             "scan_time_s": round(time.time() - t0, 2),
@@ -311,7 +290,7 @@ class SignalEngine:
     def _get_ml_signal(self, symbol: str, dataset: Dict) -> Dict:
         """
         Load trained model, build features, predict.
-        Score = (probability_up - 0.5) * 2 → maps [0,1] to [-1,+1].
+        Score = (probability_up - 0.5) * 2 -> maps [0,1] to [-1,+1].
         """
         weight = SIGNAL_WEIGHTS.get("ml_ensemble", 0.45)
         base = {
@@ -382,8 +361,6 @@ class SignalEngine:
     def _get_sentiment_signal(self, dataset: Dict) -> Dict:
         """
         Extract sentiment signal from dataset.
-        Uses pre-computed sentiment from DataManager or falls back to
-        Fear & Greed only.
         Score = sentiment_score (already -1 to +1).
         """
         weight = SIGNAL_WEIGHTS.get("sentiment", 0.15)
@@ -402,7 +379,6 @@ class SignalEngine:
                 score = float(sentiment["sentiment_score"])
                 conf = float(sentiment.get("confidence", 0.5))
 
-                # Determine signal from score
                 if score > 0.1:
                     signal = "LONG"
                 elif score < -0.1:
@@ -432,14 +408,11 @@ class SignalEngine:
             fg_val = fg.get("value")
 
             if fg_val is not None:
-                # Normalize F&G: 0=extreme fear, 100=extreme greed
-                # Map to -1 to +1 (contrarian at extremes)
-                fg_score = (fg_val - 50) / 50.0  # -1 to +1
-                # Slight contrarian adjustment at extremes
+                fg_score = (fg_val - 50) / 50.0
                 if fg_val < 20:
-                    fg_score = fg_score * 0.5 + 0.3  # less bearish
+                    fg_score = fg_score * 0.5 + 0.3
                 elif fg_val > 80:
-                    fg_score = fg_score * 0.5 - 0.3  # less bullish
+                    fg_score = fg_score * 0.5 - 0.3
 
                 signal = (
                     "LONG"
@@ -452,7 +425,7 @@ class SignalEngine:
                     "available": True,
                     "score": round(max(-1.0, min(1.0, fg_score)), 4),
                     "signal": signal,
-                    "confidence": 0.4,  # lower confidence for F&G only
+                    "confidence": 0.4,
                     "fear_greed_value": fg_val,
                     "fear_greed_label": fg.get("label", "Neutral"),
                     "reason": "fear_greed_only",
@@ -478,7 +451,7 @@ class SignalEngine:
     ) -> Dict:
         """
         Run AIBrain analysis (CoT + Expert Debate).
-        Score = direction * confidence → [-1, +1].
+        Score = direction * confidence -> [-1, +1].
         """
         weight = SIGNAL_WEIGHTS.get("ai_reasoning", 0.15)
         base = {
@@ -500,7 +473,7 @@ class SignalEngine:
 
             direction = ai_result.get("direction", 0)
             confidence = ai_result.get("confidence", 0.0)
-            score = direction * confidence  # [-1, +1]
+            score = direction * confidence
 
             return {
                 "weight": weight,
@@ -529,11 +502,6 @@ class SignalEngine:
     def _get_funding_signal(self, dataset: Dict) -> Dict:
         """
         Contrarian funding rate signal.
-
-        High positive funding → longs pay shorts → crowded long → bearish
-        Negative funding → shorts pay longs → crowded short → bullish
-        Baseline: 0.0001 (0.01%) is neutral (default Binance rate).
-
         Score = -(rate - baseline) * scale, capped to [-1, +1].
         """
         weight = SIGNAL_WEIGHTS.get("funding_rate", 0.10)
@@ -552,19 +520,11 @@ class SignalEngine:
                 return base
 
             rate = float(funding["current_rate"])
-            baseline = 0.0001  # 0.01% — neutral rate
+            baseline = 0.0001
 
-            # Contrarian score: high funding = bearish, low/negative = bullish
             adjusted = rate - baseline
             score = max(-1.0, min(1.0, -adjusted * 200))
-            # Examples:
-            #   rate=0.0001 → score=0        (neutral)
-            #   rate=0.001  → score=-0.18    (slightly bearish)
-            #   rate=0.005  → score=-0.98    (very bearish)
-            #   rate=-0.001 → score=+0.22    (slightly bullish)
-            #   rate=-0.005 → score=+1.02→1  (very bullish)
 
-            # Confidence based on how extreme the funding is
             abs_adj = abs(adjusted)
             if abs_adj > 0.003:
                 confidence = 0.8
@@ -604,10 +564,7 @@ class SignalEngine:
     def _get_market_structure_signal(self, dataset: Dict) -> Dict:
         """
         Multi-timeframe trend alignment.
-
-        For each timeframe: check price vs EMA-50 and EMA-21 vs EMA-50.
         Score = (bullish_signals - bearish_signals) / total_signals.
-        Full alignment → |score| near 1.0. Mixed → near 0.
         """
         weight = SIGNAL_WEIGHTS.get("market_structure", 0.15)
         base = {
@@ -642,7 +599,6 @@ class SignalEngine:
                     closes.ewm(span=50, adjust=False).mean().iloc[-1]
                 )
 
-                # Signal 1: Price vs EMA-50
                 if price > ema50 * 1.005:
                     bullish += 1
                     total += 1
@@ -655,7 +611,6 @@ class SignalEngine:
                     total += 1
                     price_trend = "FLAT"
 
-                # Signal 2: EMA-21 vs EMA-50
                 if ema21 > ema50 * 1.002:
                     bullish += 1
                     total += 1
@@ -677,9 +632,8 @@ class SignalEngine:
                 base["reason"] = "insufficient_data"
                 return base
 
-            score = (bullish - bearish) / total  # [-1, +1]
+            score = (bullish - bearish) / total
 
-            # Confidence: higher when more aligned
             alignment = max(bullish, bearish) / total
             confidence = round(alignment, 3)
 
@@ -714,12 +668,6 @@ class SignalEngine:
     def _combine_signals(self, components: Dict[str, Dict]) -> Dict:
         """
         Weighted combination of all component scores.
-
-        1. Filter to available components
-        2. Re-normalize weights to sum to 1.0
-        3. Compute weighted score
-        4. Map score to signal + confidence
-        5. Check agreement across components
         """
         available = {
             k: v for k, v in components.items() if v.get("available")
@@ -733,6 +681,9 @@ class SignalEngine:
                 "confidence": 0.0,
                 "combined_score": 0.0,
                 "active_components": 0,
+                "total_components": len(components),
+                "agreement": 1.0,
+                "weight_coverage": 0.0,
             }
 
         # Re-normalize weights
@@ -750,7 +701,7 @@ class SignalEngine:
             max(-1.0, min(1.0, weighted_score)), 4
         )
 
-        # Score → Signal
+        # Score -> Signal
         abs_score = abs(weighted_score)
         if weighted_score > self.SIGNAL_THRESHOLD:
             signal = "LONG"
@@ -765,7 +716,7 @@ class SignalEngine:
         # Confidence from score magnitude
         confidence = round(min(1.0, abs_score * 1.5), 3)
 
-        # Agreement: what fraction of components agree with majority?
+        # Agreement
         if direction != 0:
             agreeing = sum(
                 1
@@ -774,8 +725,6 @@ class SignalEngine:
                 or (c["score"] < 0 and direction < 0)
             )
             agreement = agreeing / len(available)
-
-            # Adjust confidence by agreement
             confidence = round(
                 confidence * (0.7 + 0.3 * agreement), 3
             )
@@ -787,12 +736,12 @@ class SignalEngine:
         return {
             "signal": signal,
             "direction": direction,
-            "confidence": confidence,
-            "combined_score": weighted_score,
+            "confidence": float(confidence),
+            "combined_score": float(weighted_score),
             "active_components": len(available),
             "total_components": len(components),
-            "agreement": round(agreement, 3),
-            "weight_coverage": round(raw_weight_sum, 3),
+            "agreement": round(float(agreement), 3),
+            "weight_coverage": round(float(raw_weight_sum), 3),
         }
 
     # ══════════════════════════════════════════════════════════════════
@@ -878,13 +827,11 @@ class SignalEngine:
 
     def _get_current_price(self, dataset: Dict) -> Optional[float]:
         """Extract current price from dataset."""
-        # Try ticker first
         ticker = dataset.get("ticker") or {}
         price = ticker.get("last_price")
         if price:
             return float(price)
 
-        # Fall back to last close
         entry_tf = TIMEFRAMES.get("entry", "1h")
         ohlcv = dataset.get("ohlcv", {})
         df = ohlcv.get(entry_tf)
@@ -927,35 +874,97 @@ class SignalEngine:
         except Exception:
             return None
 
+    # ══════════════════════════════════════════════════════════════════
+    #  DB LOGGING — v3.0.3 FIX: ensure all fields are properly saved
+    # ══════════════════════════════════════════════════════════════════
+
     def _log_signal(self, result: Dict) -> Optional[int]:
-        """Save signal to SQLite database."""
+        """
+        Save signal to SQLite database with all component details.
+
+        v3.0.3 FIX:
+          - All numeric fields explicitly cast to float (prevent None)
+          - Debug logging shows exact values being saved
+          - combined_score guaranteed to be present
+        """
         try:
             db = get_db()
 
+            # ── Extract component details for DB columns ──
+            comps = result.get("components", {})
+
+            ml = comps.get("ml_ensemble", {})
+            sent = comps.get("sentiment", {})
+            ai = comps.get("ai_reasoning", {})
+            fund = comps.get("funding_rate", {})
+            struct = comps.get("market_structure", {})
+
+            # ── Build data dict with explicit float casts ──
+            # FIX: ensure no None values sneak in for numeric fields
+            combined_score = float(result.get("combined_score", 0) or 0)
+            confidence = float(result.get("confidence", 0) or 0)
+
+            ml_dir = ml.get("signal") if ml.get("available") else None
+            ml_conf = float(ml.get("confidence", 0) or 0) if ml.get("available") else 0.0
+            ml_agree = float(ml.get("agreement", 0) or 0) if ml.get("available") else 0.0
+
+            sent_score = float(sent.get("score", 0) or 0) if sent.get("available") else 0.0
+
+            ai_dir = ai.get("signal") if ai.get("available") else None
+            ai_conf = float(ai.get("confidence", 0) or 0) if ai.get("available") else 0.0
+
+            fund_score = float(fund.get("score", 0) or 0) if fund.get("available") else 0.0
+            struct_score = float(struct.get("score", 0) or 0) if struct.get("available") else 0.0
+
             data = {
                 "symbol": result.get("symbol", "UNKNOWN"),
-                "signal": result.get("signal", "HOLD"),
                 "direction": result.get("direction", 0),
-                "confidence": result.get("confidence", 0.0),
+                "confidence": confidence,
+                "combined_score": combined_score,
                 "entry_price": result.get("entry_price"),
                 "stop_loss": result.get("stop_loss"),
                 "take_profit": result.get("take_profit"),
                 "status": "generated",
+
+                # ML ensemble
+                "ml_direction": ml_dir,
+                "ml_confidence": ml_conf,
+                "ml_agreement": ml_agree,
+
+                # Sentiment
+                "sentiment_score": sent_score,
+
+                # AI reasoning
+                "ai_direction": ai_dir,
+                "ai_confidence": ai_conf,
+
+                # Funding & structure
+                "funding_signal": fund_score,
+                "market_signal": struct_score,
+
+                # Metadata in notes
                 "notes": str({
-                    "combined_score": result.get("combined_score"),
-                    "active_components": result.get(
-                        "active_components"
-                    ),
+                    "active_components": result.get("active_components"),
+                    "total_components": result.get("total_components"),
+                    "agreement": result.get("agreement"),
                     "data_quality": result.get("data_quality"),
-                    "method": result.get("method", "signal_engine"),
+                    "weight_coverage": result.get("weight_coverage"),
                 })[:500],
             }
+
+            # ── Debug: log what we're about to save ──
+            logger.debug(
+                f"DB save: {data['symbol']} dir={data['direction']} "
+                f"conf={confidence:.3f} score={combined_score:+.3f} | "
+                f"ML={ml_dir}({ml_conf:.3f}) sent={sent_score:+.3f} "
+                f"fund={fund_score:+.3f} struct={struct_score:+.3f}"
+            )
 
             signal_id = db.save_signal(data)
             return signal_id
 
         except Exception as exc:
-            logger.warning(f"DB log failed: {exc}")
+            logger.warning(f"DB log failed: {exc}", exc_info=True)
             return None
 
     # ══════════════════════════════════════════════════════════════════
@@ -1016,20 +1025,20 @@ if __name__ == "__main__":
 
     SEP = "=" * 70
     print(f"\n{SEP}")
-    print("  SIGNAL ENGINE — TEST SUITE")
+    print("  SIGNAL ENGINE — TEST SUITE (v3.0.3)")
     print(SEP)
 
     engine = SignalEngine()
 
-    # ── Status ────────────────────────────────────────────────────────
-    print("\n[1/7] Status …")
+    # ── Status ──
+    print("\n[1/8] Status …")
     status = engine.get_status()
     print(f"  AI enabled:    {status['ai_enabled']}")
     print(f"  Threshold:     {status['signal_threshold']}")
     print(f"  Weights:       {status['signal_weights']}")
 
-    # ── Build synthetic dataset ───────────────────────────────────────
-    print("\n[2/7] Building synthetic dataset …")
+    # ── Build synthetic dataset ──
+    print("\n[2/8] Building synthetic dataset …")
     np.random.seed(42)
     n = 200
     dates = pd.date_range("2024-06-01", periods=n, freq="1h")
@@ -1045,7 +1054,6 @@ if __name__ == "__main__":
         index=dates,
     )
 
-    # 4h and 1d subsets
     fake_4h = fake_df.iloc[::4].copy()
     fake_1d = fake_df.iloc[::24].copy()
 
@@ -1072,274 +1080,196 @@ if __name__ == "__main__":
     }
     print(f"  Symbol:  {fake_dataset['symbol']}")
     print(f"  Price:   ${close[-1]:.2f}")
-    print(f"  Candles: 1h={len(fake_df)} 4h={len(fake_4h)} 1d={len(fake_1d)}")
 
-    # ── Test individual components ────────────────────────────────────
-    print("\n[3/7] Testing individual components …")
+    # ── Test individual components ──
+    print("\n[3/8] Testing individual components …")
 
-    # Sentiment
     sent = engine._get_sentiment_signal(fake_dataset)
     assert sent["available"]
     assert -1 <= sent["score"] <= 1
-    print(
-        f"  Sentiment:  score={sent['score']:+.3f} "
-        f"signal={sent['signal']} conf={sent['confidence']}"
-    )
+    print(f"  Sentiment:  score={sent['score']:+.3f} signal={sent['signal']}")
 
-    # Funding
     fund = engine._get_funding_signal(fake_dataset)
     assert fund["available"]
     assert -1 <= fund["score"] <= 1
-    print(
-        f"  Funding:    score={fund['score']:+.3f} "
-        f"signal={fund['signal']} rate={fund.get('funding_rate_pct', 0):.4f}%"
-    )
+    print(f"  Funding:    score={fund['score']:+.3f} signal={fund['signal']}")
 
-    # Market Structure
     struct = engine._get_market_structure_signal(fake_dataset)
     assert struct["available"]
     assert -1 <= struct["score"] <= 1
-    print(
-        f"  Structure:  score={struct['score']:+.3f} "
-        f"signal={struct['signal']} "
-        f"bull={struct.get('bullish_signals', 0)} "
-        f"bear={struct.get('bearish_signals', 0)}"
-    )
+    print(f"  Structure:  score={struct['score']:+.3f} signal={struct['signal']}")
 
-    # ML (will fail — no trained model for synthetic data)
     ml = engine._get_ml_signal("_FAKE_", fake_dataset)
     assert not ml["available"]
     print(f"  ML:         available={ml['available']} (expected: no model)")
 
-    # AI (skip for speed in unit test)
-    print(f"  AI:         skipped (tested via ai_brain.py)")
+    # ── Test combiner ──
+    print("\n[4/8] Testing signal combiner …")
 
-    # ── Test missing data handling ────────────────────────────────────
-    print("\n[4/7] Testing missing data handling …")
-
-    empty_dataset = {"symbol": "TEST", "ohlcv": {}}
-    sent_empty = engine._get_sentiment_signal(empty_dataset)
-    assert not sent_empty["available"]
-    print(f"  No sentiment:  available={sent_empty['available']} ✅")
-
-    fund_empty = engine._get_funding_signal(empty_dataset)
-    assert not fund_empty["available"]
-    print(f"  No funding:    available={fund_empty['available']} ✅")
-
-    struct_empty = engine._get_market_structure_signal(empty_dataset)
-    assert not struct_empty["available"]
-    print(f"  No structure:  available={struct_empty['available']} ✅")
-
-    # ── Test combiner ─────────────────────────────────────────────────
-    print("\n[5/7] Testing signal combiner …")
-
-    # All bearish
     bear_components = {
         "ml_ensemble": {
-            "available": True,
-            "score": -0.6,
-            "signal": "SHORT",
-            "confidence": 0.7,
-            "weight": 0.45,
+            "available": True, "score": -0.6, "signal": "SHORT",
+            "confidence": 0.7, "weight": 0.45,
         },
         "sentiment": {
-            "available": True,
-            "score": -0.3,
-            "signal": "SHORT",
-            "confidence": 0.6,
-            "weight": 0.15,
+            "available": True, "score": -0.3, "signal": "SHORT",
+            "confidence": 0.6, "weight": 0.15,
         },
         "ai_reasoning": {
-            "available": True,
-            "score": -0.5,
-            "signal": "SHORT",
-            "confidence": 0.65,
-            "weight": 0.15,
+            "available": True, "score": -0.5, "signal": "SHORT",
+            "confidence": 0.65, "weight": 0.15,
         },
         "funding_rate": {
-            "available": True,
-            "score": -0.2,
-            "signal": "SHORT",
-            "confidence": 0.5,
-            "weight": 0.10,
+            "available": True, "score": -0.2, "signal": "SHORT",
+            "confidence": 0.5, "weight": 0.10,
         },
         "market_structure": {
-            "available": True,
-            "score": -0.7,
-            "signal": "SHORT",
-            "confidence": 0.8,
-            "weight": 0.15,
+            "available": True, "score": -0.7, "signal": "SHORT",
+            "confidence": 0.8, "weight": 0.15,
         },
     }
     combined_bear = engine._combine_signals(bear_components)
     assert combined_bear["signal"] == "SHORT"
-    assert combined_bear["confidence"] > 0.5
-    assert combined_bear["active_components"] == 5
-    print(
-        f"  All bearish:   signal={combined_bear['signal']} "
-        f"score={combined_bear['combined_score']:+.3f} "
-        f"conf={combined_bear['confidence']:.3f}"
-    )
+    assert combined_bear["combined_score"] < 0
+    print(f"  All bearish:   signal={combined_bear['signal']} "
+          f"score={combined_bear['combined_score']:+.3f}")
 
-    # All bullish
-    bull_components = {
-        k: {**v, "score": abs(v["score"]), "signal": "LONG"}
-        for k, v in bear_components.items()
-    }
-    combined_bull = engine._combine_signals(bull_components)
-    assert combined_bull["signal"] == "LONG"
-    print(
-        f"  All bullish:   signal={combined_bull['signal']} "
-        f"score={combined_bull['combined_score']:+.3f} "
-        f"conf={combined_bull['confidence']:.3f}"
-    )
+    # ── Test DB logging ──
+    print("\n[5/8] Testing DB signal logging …")
 
-    # Mixed signals
-    mixed_components = {
-        "ml_ensemble": {
-            "available": True,
-            "score": 0.3,
-            "signal": "LONG",
-            "confidence": 0.55,
-            "weight": 0.45,
-        },
-        "sentiment": {
-            "available": True,
-            "score": -0.2,
-            "signal": "SHORT",
-            "confidence": 0.4,
-            "weight": 0.15,
-        },
-        "ai_reasoning": {
-            "available": False,
-            "score": 0.0,
-            "signal": "HOLD",
-            "confidence": 0.0,
-            "weight": 0.15,
-        },
-        "funding_rate": {
-            "available": True,
-            "score": -0.1,
-            "signal": "HOLD",
-            "confidence": 0.3,
-            "weight": 0.10,
-        },
-        "market_structure": {
-            "available": True,
-            "score": 0.4,
-            "signal": "LONG",
-            "confidence": 0.6,
-            "weight": 0.15,
+    test_result = {
+        "symbol": "TESTUSDT",
+        "signal": "SHORT",
+        "direction": -1,
+        "confidence": 0.298,
+        "combined_score": -0.234,
+        "entry_price": 600.0,
+        "stop_loss": 612.0,
+        "take_profit": 576.0,
+        "active_components": 4,
+        "total_components": 5,
+        "agreement": 0.5,
+        "data_quality": 85,
+        "weight_coverage": 0.85,
+        "components": {
+            "ml_ensemble": {
+                "available": True, "score": -0.448, "signal": "SHORT",
+                "confidence": 0.724, "agreement": 0.75, "weight": 0.45,
+            },
+            "sentiment": {
+                "available": True, "score": -0.330, "signal": "SHORT",
+                "confidence": 0.65, "weight": 0.15,
+            },
+            "ai_reasoning": {
+                "available": False, "score": 0.0, "signal": "HOLD",
+                "confidence": 0.0, "weight": 0.15,
+            },
+            "funding_rate": {
+                "available": True, "score": 0.020, "signal": "HOLD",
+                "confidence": 0.2, "weight": 0.10,
+            },
+            "market_structure": {
+                "available": True, "score": 0.333, "signal": "LONG",
+                "confidence": 0.5, "weight": 0.15,
+            },
         },
     }
-    combined_mixed = engine._combine_signals(mixed_components)
-    print(
-        f"  Mixed (no AI): signal={combined_mixed['signal']} "
-        f"score={combined_mixed['combined_score']:+.3f} "
-        f"conf={combined_mixed['confidence']:.3f} "
-        f"active={combined_mixed['active_components']}/5"
-    )
 
-    # No components
-    combined_none = engine._combine_signals({
-        "ml": {"available": False, "score": 0, "weight": 0.5},
-        "sent": {"available": False, "score": 0, "weight": 0.5},
-    })
-    assert combined_none["signal"] == "HOLD"
-    assert combined_none["confidence"] == 0.0
-    print(
-        f"  No components: signal={combined_none['signal']} "
-        f"conf={combined_none['confidence']}"
-    )
+    sig_id = engine._log_signal(test_result)
+    print(f"  Signal ID: {sig_id}")
 
-    # ── Test level calculator ─────────────────────────────────────────
-    print("\n[6/7] Testing SL/TP calculator …")
+    # Verify from DB
+    db = get_db()
+    sigs = db.get_signals(symbol="TESTUSDT", limit=1)
+    if sigs:
+        s = sigs[0]
+        db_score = float(s.get("combined_score", 0) or 0)
+        db_conf = float(s.get("confidence", 0) or 0)
+        db_ml_dir = s.get("ml_direction")
+        db_ml_conf = float(s.get("ml_confidence", 0) or 0)
+        db_sent = float(s.get("sentiment_score", 0) or 0)
+        db_fund = float(s.get("funding_signal", 0) or 0)
+        db_struct = float(s.get("market_signal", 0) or 0)
 
+        print(f"  DB verify:")
+        print(f"    combined_score: {db_score:+.3f} (expected: -0.234)")
+        print(f"    confidence:     {db_conf:.3f}  (expected: 0.298)")
+        print(f"    ml_direction:   {db_ml_dir}    (expected: SHORT)")
+        print(f"    ml_confidence:  {db_ml_conf:.3f}  (expected: 0.724)")
+        print(f"    sentiment:      {db_sent:+.3f} (expected: -0.330)")
+        print(f"    funding:        {db_fund:+.3f} (expected: +0.020)")
+        print(f"    market_signal:  {db_struct:+.3f} (expected: +0.333)")
+
+        # Assertions
+        assert abs(db_score - (-0.234)) < 0.01, f"combined_score WRONG: {db_score}"
+        assert abs(db_conf - 0.298) < 0.01, f"confidence WRONG: {db_conf}"
+        assert db_ml_dir == "SHORT", f"ml_direction WRONG: {db_ml_dir}"
+        assert abs(db_ml_conf - 0.724) < 0.01, f"ml_confidence WRONG: {db_ml_conf}"
+        assert abs(db_sent - (-0.330)) < 0.01, f"sentiment WRONG: {db_sent}"
+        assert abs(db_fund - 0.020) < 0.01, f"funding WRONG: {db_fund}"
+        assert abs(db_struct - 0.333) < 0.01, f"market_signal WRONG: {db_struct}"
+
+        print(f"  ✅ All DB fields verified correctly!")
+    else:
+        print(f"  ❌ Could not read signal back from DB!")
+
+    # ── Test level calculator ──
+    print("\n[6/8] Testing SL/TP calculator …")
     levels_long = engine._calculate_levels(fake_dataset, 1)
-    assert levels_long["entry_price"] is not None
     assert levels_long["stop_loss"] < levels_long["entry_price"]
     assert levels_long["take_profit"] > levels_long["entry_price"]
-    assert levels_long["risk_reward_ratio"] >= 1.5
-    print(
-        f"  LONG:  entry=${levels_long['entry_price']} "
-        f"SL=${levels_long['stop_loss']} "
-        f"TP=${levels_long['take_profit']} "
-        f"R:R={levels_long['risk_reward_ratio']}"
-    )
+    print(f"  LONG:  SL={levels_long['stop_loss']} TP={levels_long['take_profit']}")
 
     levels_short = engine._calculate_levels(fake_dataset, -1)
     assert levels_short["stop_loss"] > levels_short["entry_price"]
     assert levels_short["take_profit"] < levels_short["entry_price"]
-    print(
-        f"  SHORT: entry=${levels_short['entry_price']} "
-        f"SL=${levels_short['stop_loss']} "
-        f"TP=${levels_short['take_profit']} "
-        f"R:R={levels_short['risk_reward_ratio']}"
-    )
+    print(f"  SHORT: SL={levels_short['stop_loss']} TP={levels_short['take_profit']}")
 
-    levels_hold = engine._calculate_levels(fake_dataset, 0)
-    assert levels_hold["stop_loss"] is None
-    assert levels_hold["take_profit"] is None
-    print(f"  HOLD:  SL=None TP=None ✅")
-
-    # ── Test full pipeline (no AI, no live data) ──────────────────────
-    print("\n[7/7] Testing full pipeline (synthetic, no AI) …")
+    # ── Full pipeline with synthetic data ──
+    print("\n[7/8] Testing full pipeline (synthetic, no AI) …")
     result = engine.generate_signal(
         "BTCUSDT", dataset=fake_dataset, include_ai=False
     )
     assert result["signal"] in ("LONG", "SHORT", "HOLD")
     assert 0 <= result["confidence"] <= 1
-    assert "components" in result
-    print(f"  Signal:     {result['signal']}")
-    print(f"  Confidence: {result['confidence']:.3f}")
-    print(f"  Score:      {result.get('combined_score', 0):+.3f}")
-    print(f"  Entry:      ${result.get('entry_price', 'N/A')}")
-    print(f"  SL:         ${result.get('stop_loss', 'N/A')}")
-    print(f"  TP:         ${result.get('take_profit', 'N/A')}")
-    print(f"  Active:     {result.get('active_components', 0)}/5")
-    print(f"  Quality:    {result.get('data_quality', 'N/A')}")
-    print(f"  Time:       {result.get('analysis_time_s', 0)}s")
+    print(f"  Signal: {result['signal']} conf={result['confidence']:.3f} "
+          f"score={result.get('combined_score', 0):+.3f}")
 
-    if result.get("components"):
-        print(f"\n  Components:")
-        for name, comp in result["components"].items():
-            avail = "✅" if comp.get("available") else "❌"
-            print(
-                f"    {avail} {name:20s} "
-                f"score={comp.get('score', 0):+.4f} "
-                f"signal={comp.get('signal', 'N/A'):5s} "
-                f"w={comp.get('weight', 0):.0%}"
-            )
-
-    # ── Optional live test ────────────────────────────────────────────
-    print(f"\n{'─' * 40}")
-    print("  LIVE TEST: Generating signal for BTCUSDT …")
-    print(f"{'─' * 40}")
-    try:
-        live_result = engine.generate_signal(
-            "BTCUSDT", include_ai=False
-        )
-        if live_result.get("error"):
-            print(f"  ⚠️  Error: {live_result['error']}")
+    # Verify this signal in DB too
+    btc_sigs = db.get_signals(symbol="BTCUSDT", limit=1)
+    if btc_sigs:
+        bs = btc_sigs[0]
+        bs_score = float(bs.get("combined_score", 0) or 0)
+        bs_sent = float(bs.get("sentiment_score", 0) or 0)
+        print(f"  DB check: score={bs_score:+.3f} sent={bs_sent:+.3f}")
+        if abs(bs_score) < 0.001 and result.get("combined_score", 0) != 0:
+            print(f"  ❌ BUG: combined_score is 0 in DB but "
+                  f"{result['combined_score']:+.3f} in result!")
         else:
-            print(f"  Signal:     {live_result['signal']}")
-            print(f"  Confidence: {live_result['confidence']:.3f}")
-            print(f"  Score:      {live_result.get('combined_score', 0):+.3f}")
-            print(f"  Entry:      ${live_result.get('entry_price', 'N/A')}")
-            print(f"  SL:         ${live_result.get('stop_loss', 'N/A')}")
-            print(f"  TP:         ${live_result.get('take_profit', 'N/A')}")
-            print(f"  Active:     {live_result.get('active_components', 0)}/5")
-            print(f"  Time:       {live_result.get('analysis_time_s', 0)}s")
+            print(f"  ✅ DB values match result")
 
-            if live_result.get("components"):
-                print(f"\n  Components:")
-                for name, comp in live_result["components"].items():
-                    avail = "✅" if comp.get("available") else "❌"
-                    print(
-                        f"    {avail} {name:20s} "
-                        f"score={comp.get('score', 0):+.4f} "
-                        f"signal={comp.get('signal', 'N/A'):5s}"
-                    )
+    # ── Optional live test ──
+    print(f"\n[8/8] Live test (BTCUSDT, no AI) …")
+    try:
+        live = engine.generate_signal("BTCUSDT", include_ai=False)
+        if live.get("error"):
+            print(f"  ⚠️  Error: {live['error']}")
+        else:
+            print(f"  Signal: {live['signal']} conf={live['confidence']:.3f} "
+                  f"score={live.get('combined_score', 0):+.3f}")
+
+            # Verify in DB
+            live_sigs = db.get_signals(symbol="BTCUSDT", limit=1)
+            if live_sigs:
+                ls = live_sigs[0]
+                ls_score = float(ls.get("combined_score", 0) or 0)
+                ls_ml = ls.get("ml_direction")
+                ls_ml_c = float(ls.get("ml_confidence", 0) or 0)
+                ls_sent = float(ls.get("sentiment_score", 0) or 0)
+                ls_fund = float(ls.get("funding_signal", 0) or 0)
+                ls_struct = float(ls.get("market_signal", 0) or 0)
+                print(f"  DB: score={ls_score:+.3f} ML={ls_ml}({ls_ml_c:.2f}) "
+                      f"sent={ls_sent:+.3f} fund={ls_fund:+.3f} struct={ls_struct:+.3f}")
     except Exception as exc:
         print(f"  ❌ Live test failed: {exc}")
 

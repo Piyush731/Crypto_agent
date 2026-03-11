@@ -231,7 +231,7 @@ RISK_CONFIG = {
     "max_consecutive_losses": 5,     # Pause after 5 losses in a row
 
     # Confidence filters
-    "min_confidence_to_trade": 0.35, # Only trade if confidence > 58%  chngx to 65
+    "min_confidence_to_trade": 0.15, # Only trade if confidence > 58%  chngx to 65
     "min_agreement_to_trade": 0.60,  # Only trade if 60%+ models agree
 }
 

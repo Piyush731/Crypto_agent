@@ -35,6 +35,28 @@ from core.db import get_db
 logger = get_logger("main")
 VERSION = "3.0"
 
+PID_FILE = config.BASE_DIR / "paper_trader.pid"
+
+
+def _write_pid():
+    """Write current process PID for daemon management."""
+    import os
+    try:
+        PID_FILE.write_text(str(os.getpid()))
+        logger.info(f"PID {os.getpid()} written to {PID_FILE}")
+    except Exception as e:
+        logger.warning(f"Could not write PID file: {e}")
+
+
+def _remove_pid():
+    """Remove PID file on clean exit."""
+    try:
+        if PID_FILE.exists():
+            PID_FILE.unlink()
+            logger.debug("PID file removed")
+    except Exception:
+        pass
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  LAZY MODULE LOADERS — heavy modules loaded only when needed
@@ -898,7 +920,10 @@ def action_paper():
                 print(f"\n  {C.BOLD}── Open Positions ({len(positions)}) ──{C.RESET}")
                 for pos in positions:
                     s   = pos.get("symbol", "?")
-                    d   = pos.get("direction", "?")
+                    d_raw = pos.get("direction", "?")
+                    d   = pos.get("direction_label", 
+                        "LONG" if str(d_raw) == "1" else 
+                        "SHORT" if str(d_raw) == "-1" else str(d_raw))
                     ep  = pos.get("entry_price", 0)
                     cp  = pos.get("current_price", ep)
                     upnl = pos.get("unrealized_pnl", 0)
@@ -919,7 +944,7 @@ def action_paper():
 
             ds = perf.get("db_stats", {})
             if ds:
-                print(f"\n    Win Rate:      {ds.get('win_rate', 0):.1%}")
+                print(f"\n    Win Rate:      {ds.get('win_rate', 0):.1f}%")
                 print(f"    Total Trades:  {ds.get('total_trades', 0)}")
                 print(f"    Profit Factor: {ds.get('profit_factor', 0):.2f}")
                 print(f"    Total P&L:     {_pnl(ds.get('total_pnl', 0))}")
@@ -1240,6 +1265,25 @@ def action_signals():
             print(f"\n  No signals found.")
             return
 
+        # _hdr(f"📡  RECENT SIGNALS" + (f" — {symbol}" if symbol else ""))
+        # print(f"  {'Time':<20s} {'Symbol':<10s} {'Signal':<7s} "
+        #       f"{'Conf':>6s} {'Score':>7s} {'Entry':>10s}")
+        # print(f"  {'─'*20} {'─'*10} {'─'*7} {'─'*6} {'─'*7} {'─'*10}")
+
+        # for sig in signals:
+        #     ts = sig.get("timestamp", "?")
+        #     if isinstance(ts, str) and len(ts) > 19:
+        #         ts = ts[:19]
+        #     sy = sig.get("symbol", "?")
+        #     si_raw = sig.get("direction", "?")
+        #     si = "LONG" if str(si_raw) in ("1", "LONG") else (
+        #          "SHORT" if str(si_raw) in ("-1", "SHORT") else "HOLD")
+        #     co = sig.get("confidence", 0)
+        #     sc = sig.get("combined_score", 0)
+        #     ep = sig.get("entry_price", 0)
+        #     em = "🟢" if si == "LONG" else ("🔴" if si == "SHORT" else "⚪")
+        #     print(f"  {str(ts):<20s} {sy:<10s} {em}{si:<6s} "
+        #           f"{co:>5.1%} {sc:>+6.3f} {_price(ep):>10s}")
         _hdr(f"📡  RECENT SIGNALS" + (f" — {symbol}" if symbol else ""))
         print(f"  {'Time':<20s} {'Symbol':<10s} {'Signal':<7s} "
               f"{'Conf':>6s} {'Score':>7s} {'Entry':>10s}")
@@ -1250,9 +1294,12 @@ def action_signals():
             if isinstance(ts, str) and len(ts) > 19:
                 ts = ts[:19]
             sy = sig.get("symbol", "?")
-            si = sig.get("signal", "?")
+            si_raw = sig.get("direction", "?")
+            si = "LONG" if str(si_raw) in ("1", "LONG") else (
+                 "SHORT" if str(si_raw) in ("-1", "SHORT") else "HOLD")
             co = sig.get("confidence", 0)
-            sc = sig.get("combined_score", 0)
+            # FIX: read combined_score from DB (new column), fallback 0
+            sc = sig.get("combined_score") or 0
             ep = sig.get("entry_price", 0)
             em = "🟢" if si == "LONG" else ("🔴" if si == "SHORT" else "⚪")
             print(f"  {str(ts):<20s} {sy:<10s} {em}{si:<6s} "
@@ -1362,7 +1409,7 @@ def action_db_stats():
             if stats and stats.get("total_trades", 0) > 0:
                 print(f"\n    {C.BOLD}── {mode.upper()} Stats ──{C.RESET}")
                 print(f"    Total Trades:  {stats.get('total_trades', 0)}")
-                print(f"    Win Rate:      {stats.get('win_rate', 0):.1%}")
+                print(f"    Win Rate:      {stats.get('win_rate', 0):.1f}%")
                 print(f"    Total P&L:     {_pnl(stats.get('total_pnl', 0))}")
                 pf = stats.get("profit_factor", 0)
                 print(f"    Profit Factor: {pf:.2f}")
@@ -1591,10 +1638,52 @@ def _run_cli(args):
     #             )
     #         paper.start()
     #         st = paper.get_status()
+    # if args.paper:
+    #     include_ai = config.AI_CONFIG["enabled"] and not no_ai
+    #     print(f"\n  🚀 Starting paper trading (Ctrl+C to stop) ...")
+    #     try:
+    #         paper = _new_paper_trader(include_ai)
+    #         if config.TELEGRAM_CONFIG["enabled"]:
+    #             _get("telegram").send_startup(
+    #                 "paper",
+    #                 config.BACKTEST_CONFIG["initial_capital"],
+    #                 config.TRADING_PAIRS,
+    #             )
+
+    #         # Start Telegram command bot for remote monitoring
+    #         cmd_bot = None
+    #         if config.TELEGRAM_CONFIG["enabled"]:
+    #             try:
+    #                 from notifications.telegram_bot import TelegramCommandBot
+    #                 cmd_bot = TelegramCommandBot()
+    #                 cmd_bot.start()
+    #             except Exception as e:
+    #                 logger.warning(f"Telegram command bot: {e}")
+
+    #         paper.start()
+
+    #         if cmd_bot:
+    #             cmd_bot.stop()
+
+    #         st = paper.get_status()
+            
+    #         print(f"\n  Stopped. Capital: ${st.get('capital',0):,.2f}, "
+    #               f"P&L: {_pnl(st.get('pnl',0))}")
+    #         if config.TELEGRAM_CONFIG["enabled"]:
+    #             _get("telegram").send_shutdown(
+    #                 st.get("capital", 0), st.get("pnl", 0)
+    #             )
+    #     except KeyboardInterrupt:
+    #         print(f"\n  Paper trading stopped by user.")
+    #     except Exception as e:
+    #         logger.error(f"CLI paper failed: {e}", exc_info=True)
+    #         print(f"  {C.RED}❌ {e}{C.RESET}")
+    #     return True
     if args.paper:
         include_ai = config.AI_CONFIG["enabled"] and not no_ai
         print(f"\n  🚀 Starting paper trading (Ctrl+C to stop) ...")
         try:
+            _write_pid()  # FIX: write PID file for daemon management
             paper = _new_paper_trader(include_ai)
             if config.TELEGRAM_CONFIG["enabled"]:
                 _get("telegram").send_startup(
@@ -1619,7 +1708,7 @@ def _run_cli(args):
                 cmd_bot.stop()
 
             st = paper.get_status()
-            
+
             print(f"\n  Stopped. Capital: ${st.get('capital',0):,.2f}, "
                   f"P&L: {_pnl(st.get('pnl',0))}")
             if config.TELEGRAM_CONFIG["enabled"]:
@@ -1631,6 +1720,8 @@ def _run_cli(args):
         except Exception as e:
             logger.error(f"CLI paper failed: {e}", exc_info=True)
             print(f"  {C.RED}❌ {e}{C.RESET}")
+        finally:
+            _remove_pid()  # FIX: clean up PID file on exit
         return True
 
     if args.paper_cycle:

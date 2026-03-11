@@ -765,7 +765,9 @@ class TelegramCommandBot:
 
             for s in signals:
                 sym = s.get("symbol", "?")
-                sig = s.get("signal", "?")
+                sig_raw = s.get("direction", "?")
+                sig = "LONG" if str(sig_raw) in ("1", "LONG") else (
+                      "SHORT" if str(sig_raw) in ("-1", "SHORT") else "HOLD")
                 conf = s.get("confidence", 0)
                 score = s.get("combined_score", 0)
                 ts = s.get("timestamp", "")

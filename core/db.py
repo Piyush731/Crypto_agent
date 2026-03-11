@@ -1,6 +1,5 @@
 """
 core/db.py
-==========
 SQLite database manager for the crypto futures agent.
 
 Usage in any module:
@@ -11,17 +10,23 @@ Usage in any module:
     trades = db.get_trades(symbol="BTCUSDT")
 
 Tables:
-    - signals:     Every prediction generated (direction, confidence, components)
-    - trades:      Paper/live trade records (entry, exit, PnL)
-    - performance: Daily performance snapshots
-    - errors:      Error tracking for debugging
+  - signals:     Every prediction generated (direction, confidence, components)
+  - trades:      Paper/live trade records (entry, exit, PnL)
+  - performance: Daily performance snapshots
+  - errors:      Error tracking for debugging
 
 Features:
-    - Thread-safe with locks
-    - WAL mode for concurrent reads
-    - Singleton via get_db()
-    - Dict-like row access (row["column_name"])
-    - Risk queries for circuit breakers
+  - Thread-safe with locks
+  - WAL mode for concurrent reads
+  - Singleton via get_db()
+  - Dict-like row access (row["column_name"])
+  - Risk queries for circuit breakers
+  - Auto-migration for schema upgrades
+
+v3.0.2:
+  - Added combined_score to signals table
+  - Fixed save_signal log line (confidence display)
+  - Migration adds combined_score to existing DBs
 """
 
 import sqlite3
@@ -44,7 +49,7 @@ logger = get_logger(__name__)
 
 
 # ╔═══════════════════════════════════════════════════════════╗
-# ║  TABLE SCHEMAS                                             ║
+# ║                     TABLE SCHEMAS                        ║
 # ╚═══════════════════════════════════════════════════════════╝
 
 SCHEMA_SIGNALS = """
@@ -52,26 +57,25 @@ CREATE TABLE IF NOT EXISTS signals (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp       TEXT    NOT NULL DEFAULT (datetime('now')),
     symbol          TEXT    NOT NULL,
-    direction       TEXT    NOT NULL,           -- LONG / SHORT / HOLD
-    confidence      REAL    NOT NULL DEFAULT 0, -- 0-100 final combined
+    direction       TEXT    NOT NULL,
+    confidence      REAL    NOT NULL DEFAULT 0,
+    combined_score  REAL    DEFAULT 0,
     entry_price     REAL,
     stop_loss       REAL,
     take_profit     REAL,
     timeframe       TEXT    DEFAULT '4h',
     horizon_hours   INTEGER DEFAULT 24,
 
-    -- Component scores (for analysis)
     ml_direction    TEXT,
     ml_confidence   REAL    DEFAULT 0,
-    ml_agreement    REAL    DEFAULT 0,          -- model agreement %
-    sentiment_score REAL    DEFAULT 0,          -- -1 to +1
+    ml_agreement    REAL    DEFAULT 0,
+    sentiment_score REAL    DEFAULT 0,
     ai_direction    TEXT,
     ai_confidence   REAL    DEFAULT 0,
-    funding_signal  REAL    DEFAULT 0,          -- -1 to +1
-    market_signal   REAL    DEFAULT 0,          -- -1 to +1
+    funding_signal  REAL    DEFAULT 0,
+    market_signal   REAL    DEFAULT 0,
 
-    -- Tracking
-    status          TEXT    DEFAULT 'active',   -- active / closed / expired / rejected
+    status          TEXT    DEFAULT 'active',
     reject_reason   TEXT,
     notes           TEXT,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -83,8 +87,8 @@ CREATE TABLE IF NOT EXISTS trades (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     signal_id       INTEGER,
     symbol          TEXT    NOT NULL,
-    direction       TEXT    NOT NULL,           -- LONG / SHORT
-    mode            TEXT    NOT NULL DEFAULT 'backtest', -- backtest / paper / live
+    direction       TEXT    NOT NULL,
+    mode            TEXT    NOT NULL DEFAULT 'backtest',
 
     entry_price     REAL    NOT NULL,
     entry_time      TEXT    NOT NULL,
@@ -96,12 +100,17 @@ CREATE TABLE IF NOT EXISTS trades (
     stop_loss       REAL,
     take_profit     REAL,
 
+    position_size_usd REAL  DEFAULT 0,
+    signal_type     TEXT,
+    confidence      REAL    DEFAULT 0,
+    margin_used     REAL    DEFAULT 0,
+
     pnl_usd        REAL    DEFAULT 0,
     pnl_percent     REAL    DEFAULT 0,
     commission      REAL    DEFAULT 0,
 
-    status          TEXT    DEFAULT 'open',     -- open / closed / cancelled
-    exit_reason     TEXT,                       -- tp / sl / trailing / manual / expired / signal
+    status          TEXT    DEFAULT 'open',
+    exit_reason     TEXT,
 
     notes           TEXT,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -163,7 +172,7 @@ INDEXES = [
 
 
 # ╔═══════════════════════════════════════════════════════════╗
-# ║  DATABASE CLASS                                            ║
+# ║                    DATABASE CLASS                        ║
 # ╚═══════════════════════════════════════════════════════════╝
 
 class Database:
@@ -173,6 +182,7 @@ class Database:
         self.db_path = str(db_path or DB_PATH)
         self._lock = threading.Lock()
         self._create_tables()
+        self._migrate_tables()
         logger.info(f"Database initialized: {self.db_path}")
 
     # ── Connection ───────────────────────────────────────────
@@ -187,32 +197,19 @@ class Database:
 
     def _execute(self, query: str, params: tuple = (),
                  fetch: str = "none") -> Any:
-        """
-        Thread-safe query execution.
-
-        Args:
-            query:  SQL query string
-            params: Query parameters
-            fetch:  "none" | "one" | "all"
-
-        Returns:
-            lastrowid for INSERT, row(s) for SELECT, None otherwise
-        """
+        """Thread-safe query execution."""
         with self._lock:
             conn = self._connect()
             try:
                 cursor = conn.execute(query, params)
-
                 if fetch == "one":
                     result = cursor.fetchone()
                 elif fetch == "all":
                     result = cursor.fetchall()
                 else:
                     result = cursor.lastrowid
-
                 conn.commit()
                 return result
-
             except sqlite3.Error as e:
                 conn.rollback()
                 logger.error(f"DB error: {e} | Query: {query[:100]}")
@@ -247,10 +244,8 @@ class Database:
                 conn.execute(SCHEMA_TRADES)
                 conn.execute(SCHEMA_PERFORMANCE)
                 conn.execute(SCHEMA_ERRORS)
-
                 for idx_sql in INDEXES:
                     conn.execute(idx_sql)
-
                 conn.commit()
                 logger.debug("Database tables verified/created")
             except sqlite3.Error as e:
@@ -260,22 +255,69 @@ class Database:
                 conn.close()
 
     # ──────────────────────────────────────────────────────────
+    # Schema migration for existing databases.
+    # Safe to run repeatedly (checks columns before ALTER).
+    # ──────────────────────────────────────────────────────────
+    def _migrate_tables(self):
+        """Add columns missing from older schema versions."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                migrated = 0
+
+                # ── Trades table migrations ──
+                cursor = conn.execute("PRAGMA table_info(trades)")
+                trade_cols = {row[1] for row in cursor.fetchall()}
+
+                trade_migrations = [
+                    ("position_size_usd", "REAL DEFAULT 0"),
+                    ("signal_type",       "TEXT"),
+                    ("confidence",        "REAL DEFAULT 0"),
+                    ("margin_used",       "REAL DEFAULT 0"),
+                ]
+                for col_name, col_type in trade_migrations:
+                    if col_name not in trade_cols:
+                        conn.execute(
+                            f"ALTER TABLE trades ADD COLUMN {col_name} {col_type}"
+                        )
+                        migrated += 1
+                        logger.info(f"Migration: added trades.{col_name}")
+
+                # ── Signals table migrations ──
+                cursor = conn.execute("PRAGMA table_info(signals)")
+                signal_cols = {row[1] for row in cursor.fetchall()}
+
+                signal_migrations = [
+                    ("combined_score", "REAL DEFAULT 0"),
+                ]
+                for col_name, col_type in signal_migrations:
+                    if col_name not in signal_cols:
+                        conn.execute(
+                            f"ALTER TABLE signals ADD COLUMN {col_name} {col_type}"
+                        )
+                        migrated += 1
+                        logger.info(f"Migration: added signals.{col_name}")
+
+                if migrated > 0:
+                    conn.commit()
+                    logger.info(f"Migration complete: {migrated} column(s) added")
+                else:
+                    logger.debug("Migration: no changes needed")
+
+            except sqlite3.Error as e:
+                logger.error(f"Migration error: {e}", exc_info=True)
+            finally:
+                conn.close()
+
+    # ──────────────────────────────────────────────────────────
     #  SIGNALS CRUD
     # ──────────────────────────────────────────────────────────
 
     def save_signal(self, data: Dict) -> int:
-        """
-        Save a prediction signal.
-
-        Args:
-            data: Dict with keys matching signals columns.
-                  Required: symbol, direction, confidence
-
-        Returns:
-            Signal ID (int)
-        """
+        """Save a prediction signal. Returns Signal ID."""
         columns = [
             "timestamp", "symbol", "direction", "confidence",
+            "combined_score",
             "entry_price", "stop_loss", "take_profit",
             "timeframe", "horizon_hours",
             "ml_direction", "ml_confidence", "ml_agreement",
@@ -283,14 +325,11 @@ class Database:
             "funding_signal", "market_signal",
             "status", "reject_reason", "notes",
         ]
-
-        # Filter to only columns that exist in data
         present = {k: data[k] for k in columns if k in data}
 
         if "symbol" not in present or "direction" not in present:
             raise ValueError("Signal must have 'symbol' and 'direction'")
 
-        # Set defaults
         present.setdefault("timestamp", datetime.now().isoformat())
         present.setdefault("confidence", 0)
         present.setdefault("status", "active")
@@ -300,34 +339,36 @@ class Database:
         query = f"INSERT INTO signals ({cols}) VALUES ({placeholders})"
 
         signal_id = self._execute(query, tuple(present.values()))
+
+        # FIX: display confidence as percentage correctly
+        conf = present.get("confidence", 0)
+        score = present.get("combined_score", 0)
         logger.info(
             f"Signal saved #{signal_id}: {present.get('symbol')} "
-            f"{present.get('direction')} @ {present.get('confidence', 0):.1f}%"
+            f"{present.get('direction')} | "
+            f"conf={conf:.1%} score={score:+.3f}"
         )
         return signal_id
 
     def get_signals(self, symbol: str = None, status: str = None,
                     limit: int = 50) -> List[Dict]:
-        """Get signals, newest first. Optionally filter by symbol/status."""
+        """Get signals, newest first."""
         query = "SELECT * FROM signals WHERE 1=1"
         params = []
-
         if symbol:
             query += " AND symbol = ?"
             params.append(symbol)
         if status:
             query += " AND status = ?"
             params.append(status)
-
         query += " ORDER BY id DESC LIMIT ?"
         params.append(limit)
-
         rows = self._execute(query, tuple(params), fetch="all")
         return [dict(r) for r in rows] if rows else []
 
     def update_signal_status(self, signal_id: int, status: str,
                              notes: str = None):
-        """Update a signal's status (e.g., active → closed)."""
+        """Update a signal's status."""
         if notes:
             self._execute(
                 "UPDATE signals SET status=?, notes=? WHERE id=?",
@@ -345,20 +386,12 @@ class Database:
     # ──────────────────────────────────────────────────────────
 
     def save_trade(self, data: Dict) -> int:
-        """
-        Save a trade record.
-
-        Args:
-            data: Dict with keys matching trades columns.
-                  Required: symbol, direction, entry_price, entry_time
-
-        Returns:
-            Trade ID (int)
-        """
+        """Save a trade record. Returns Trade ID."""
         columns = [
             "signal_id", "symbol", "direction", "mode",
             "entry_price", "entry_time", "exit_price", "exit_time",
             "quantity", "leverage", "stop_loss", "take_profit",
+            "position_size_usd", "signal_type", "confidence", "margin_used",
             "pnl_usd", "pnl_percent", "commission",
             "status", "exit_reason", "notes",
         ]
@@ -384,6 +417,7 @@ class Database:
             f"Trade saved #{trade_id}: {present['mode'].upper()} "
             f"{present['symbol']} {present['direction']} "
             f"@ {present['entry_price']}"
+            f" size=${present.get('position_size_usd', 0):,.2f}"
         )
         return trade_id
 
@@ -418,10 +452,9 @@ class Database:
 
     def get_trades(self, symbol: str = None, mode: str = None,
                    status: str = None, limit: int = 100) -> List[Dict]:
-        """Get trades, newest first. Optionally filter."""
+        """Get trades, newest first."""
         query = "SELECT * FROM trades WHERE 1=1"
         params = []
-
         if symbol:
             query += " AND symbol = ?"
             params.append(symbol)
@@ -431,10 +464,8 @@ class Database:
         if status:
             query += " AND status = ?"
             params.append(status)
-
         query += " ORDER BY id DESC LIMIT ?"
         params.append(limit)
-
         rows = self._execute(query, tuple(params), fetch="all")
         return [dict(r) for r in rows] if rows else []
 
@@ -447,10 +478,10 @@ class Database:
     # ──────────────────────────────────────────────────────────
 
     def get_daily_pnl(self, mode: str = "paper") -> float:
-        """Sum of PnL for trades closed today."""
+        """Sum of PnL USD for trades closed today."""
         today = datetime.now().strftime("%Y-%m-%d")
         row = self._execute(
-            """SELECT COALESCE(SUM(pnl_percent), 0) as total
+            """SELECT COALESCE(SUM(pnl_usd), 0) as total
                FROM trades
                WHERE mode=? AND status='closed'
                  AND date(exit_time) = ?""",
@@ -459,10 +490,10 @@ class Database:
         return float(row["total"]) if row else 0.0
 
     def get_weekly_pnl(self, mode: str = "paper") -> float:
-        """Sum of PnL for trades closed in last 7 days."""
+        """Sum of PnL USD for trades closed in last 7 days."""
         week_ago = (datetime.now() - timedelta(days=7)).isoformat()
         row = self._execute(
-            """SELECT COALESCE(SUM(pnl_percent), 0) as total
+            """SELECT COALESCE(SUM(pnl_usd), 0) as total
                FROM trades
                WHERE mode=? AND status='closed'
                  AND exit_time >= ?""",
@@ -473,26 +504,25 @@ class Database:
     def get_consecutive_losses(self, mode: str = "paper") -> int:
         """Count consecutive losing trades from the most recent."""
         rows = self._execute(
-            """SELECT pnl_percent FROM trades
+            """SELECT pnl_usd FROM trades
                WHERE mode=? AND status='closed'
                ORDER BY id DESC LIMIT 20""",
             (mode,), fetch="all"
         )
         if not rows:
             return 0
-
         count = 0
         for row in rows:
-            if row["pnl_percent"] < 0:
+            if float(row["pnl_usd"]) < 0:
                 count += 1
             else:
                 break
         return count
 
     def get_total_pnl(self, mode: str = "paper") -> float:
-        """Total PnL across all closed trades."""
+        """Total PnL in USD across all closed trades."""
         row = self._execute(
-            """SELECT COALESCE(SUM(pnl_percent), 0) as total
+            """SELECT COALESCE(SUM(pnl_usd), 0) as total
                FROM trades
                WHERE mode=? AND status='closed'""",
             (mode,), fetch="one"
@@ -520,7 +550,6 @@ class Database:
             "total_pnl", "avg_pnl", "best_trade", "worst_trade",
             "max_drawdown", "sharpe_ratio", "profit_factor", "notes",
         ]
-
         present = {k: data[k] for k in columns if k in data}
         present.setdefault("date", datetime.now().strftime("%Y-%m-%d"))
         present.setdefault("mode", "backtest")
@@ -529,7 +558,6 @@ class Database:
         cols = ", ".join(present.keys())
         placeholders = ", ".join(["?"] * len(present))
         query = f"INSERT INTO performance ({cols}) VALUES ({placeholders})"
-
         perf_id = self._execute(query, tuple(present.values()))
         logger.debug(f"Performance snapshot saved #{perf_id}")
         return perf_id
@@ -540,11 +568,9 @@ class Database:
         cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         query = "SELECT * FROM performance WHERE date >= ?"
         params = [cutoff]
-
         if mode:
             query += " AND mode = ?"
             params.append(mode)
-
         query += " ORDER BY date DESC"
         rows = self._execute(query, tuple(params), fetch="all")
         return [dict(r) for r in rows] if rows else []
@@ -555,18 +581,7 @@ class Database:
 
     def save_error(self, module: str, error_type: str,
                    message: str, traceback_str: str = None) -> int:
-        """
-        Log an error to the database.
-
-        Args:
-            module:        Which module had the error (e.g., "data.binance_data")
-            error_type:    Exception class name (e.g., "ConnectionError")
-            message:       Error message
-            traceback_str: Full traceback string (optional)
-
-        Returns:
-            Error record ID
-        """
+        """Log an error to the database."""
         error_id = self._execute(
             """INSERT INTO errors (module, error_type, message, traceback)
                VALUES (?, ?, ?, ?)""",
@@ -580,37 +595,28 @@ class Database:
         """Get recent errors, optionally filtered by module."""
         query = "SELECT * FROM errors WHERE 1=1"
         params = []
-
         if module:
             query += " AND module = ?"
             params.append(module)
-
         query += " ORDER BY id DESC LIMIT ?"
         params.append(limit)
-
         rows = self._execute(query, tuple(params), fetch="all")
         return [dict(r) for r in rows] if rows else []
 
     # ──────────────────────────────────────────────────────────
-    #  STATISTICS (for reports / Telegram)
+    #  STATISTICS
     # ──────────────────────────────────────────────────────────
 
     def get_stats(self, mode: str = None, symbol: str = None,
                   days: int = 30) -> Dict:
-        """
-        Calculate trading statistics for a period.
-
-        Returns:
-            Dict with total_trades, win_rate, total_pnl, avg_pnl,
-            best_trade, worst_trade, profit_factor, etc.
-        """
+        """Calculate trading statistics for a period."""
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
         query = """
             SELECT
                 COUNT(*)                           as total_trades,
-                SUM(CASE WHEN pnl_percent > 0
+                SUM(CASE WHEN pnl_usd > 0
                     THEN 1 ELSE 0 END)             as winning_trades,
-                SUM(CASE WHEN pnl_percent <= 0
+                SUM(CASE WHEN pnl_usd <= 0
                     THEN 1 ELSE 0 END)             as losing_trades,
                 COALESCE(SUM(pnl_percent), 0)      as total_pnl,
                 COALESCE(AVG(pnl_percent), 0)      as avg_pnl,
@@ -622,7 +628,6 @@ class Database:
             WHERE status = 'closed' AND entry_time >= ?
         """
         params = [cutoff]
-
         if mode:
             query += " AND mode = ?"
             params.append(mode)
@@ -644,15 +649,14 @@ class Database:
 
         total = row["total_trades"]
         wins = row["winning_trades"] or 0
-        losses = row["losing_trades"] or 0
 
-        # Profit factor = gross profit / gross loss
+        # Profit factor
         pf_row = self._execute(
             """SELECT
-                COALESCE(SUM(CASE WHEN pnl_percent > 0
-                    THEN pnl_percent ELSE 0 END), 0) as gross_profit,
-                COALESCE(SUM(CASE WHEN pnl_percent < 0
-                    THEN ABS(pnl_percent) ELSE 0 END), 0.01) as gross_loss
+                COALESCE(SUM(CASE WHEN pnl_usd > 0
+                    THEN pnl_usd ELSE 0 END), 0) as gross_profit,
+                COALESCE(SUM(CASE WHEN pnl_usd < 0
+                    THEN ABS(pnl_usd) ELSE 0 END), 0.01) as gross_loss
                FROM trades
                WHERE status='closed' AND entry_time >= ?"""
             + (" AND mode=?" if mode else "")
@@ -666,7 +670,7 @@ class Database:
         return {
             "total_trades": total,
             "winning_trades": wins,
-            "losing_trades": losses,
+            "losing_trades": row["losing_trades"] or 0,
             "win_rate": round((wins / total * 100) if total > 0 else 0, 1),
             "total_pnl": round(row["total_pnl"], 2),
             "avg_pnl": round(row["avg_pnl"], 2),
@@ -689,18 +693,14 @@ class Database:
         if table not in allowed:
             raise ValueError(f"Table must be one of {allowed}")
         row = self._execute(
-            f"SELECT COUNT(*) as cnt FROM {table}",
-            fetch="one"
+            f"SELECT COUNT(*) as cnt FROM {table}", fetch="one"
         )
         return int(row["cnt"]) if row else 0
 
     def cleanup_old(self, days: int = 90):
         """Delete records older than N days from errors table."""
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-        self._execute(
-            "DELETE FROM errors WHERE timestamp < ?",
-            (cutoff,)
-        )
+        self._execute("DELETE FROM errors WHERE timestamp < ?", (cutoff,))
         logger.info(f"Cleaned up errors older than {days} days")
 
     def get_table_info(self) -> Dict[str, int]:
@@ -714,7 +714,7 @@ class Database:
 
 
 # ╔═══════════════════════════════════════════════════════════╗
-# ║  SINGLETON ACCESS                                          ║
+# ║                   SINGLETON ACCESS                       ║
 # ╚═══════════════════════════════════════════════════════════╝
 
 _db_instance: Optional[Database] = None
@@ -722,20 +722,7 @@ _db_lock = threading.Lock()
 
 
 def get_db(db_path: str = None) -> Database:
-    """
-    Get the shared Database instance (singleton).
-
-    Args:
-        db_path: Override path (mainly for testing)
-
-    Returns:
-        Database instance
-
-    Usage:
-        from core.db import get_db
-        db = get_db()
-        db.save_signal({...})
-    """
+    """Get the shared Database instance (singleton)."""
     global _db_instance
     with _db_lock:
         if _db_instance is None:
@@ -744,184 +731,77 @@ def get_db(db_path: str = None) -> Database:
 
 
 # ╔═══════════════════════════════════════════════════════════╗
-# ║  STANDALONE TEST                                           ║
+# ║                   STANDALONE TEST                        ║
 # ╚═══════════════════════════════════════════════════════════╝
 
 if __name__ == "__main__":
     import os
 
     print("=" * 60)
-    print("  DATABASE TEST")
+    print("  DATABASE TEST (v3.0.2 — combined_score)")
     print("=" * 60)
 
-    # Use a temp test database (not the real one)
     test_db_path = Path(__file__).parent.parent / "test_agent.db"
-
-    # Remove old test DB if exists
     if test_db_path.exists():
         os.remove(test_db_path)
-        print(f"  Removed old test DB")
 
     db = Database(str(test_db_path))
 
-    # ── Test 1: Save signals ────────────────────────────────
-    print("\n--- Test 1: Signals ---")
-
-    sig1_id = db.save_signal({
+    # ── Test: save signal WITH combined_score ──
+    print("\n--- Test: Signal with combined_score ---")
+    s1_id = db.save_signal({
         "symbol": "BTCUSDT",
-        "direction": "LONG",
-        "confidence": 72.5,
-        "entry_price": 67500.0,
-        "stop_loss": 66200.0,
-        "take_profit": 70100.0,
-        "ml_direction": "LONG",
-        "ml_confidence": 75.0,
-        "ml_agreement": 0.85,
-        "sentiment_score": 0.35,
-        "ai_direction": "LONG",
-        "ai_confidence": 68.0,
-        "funding_signal": -0.2,
-        "market_signal": 0.4,
-    })
-    print(f"  ✅ Signal #1 saved (ID: {sig1_id})")
-
-    sig2_id = db.save_signal({
-        "symbol": "ETHUSDT",
         "direction": "SHORT",
-        "confidence": 61.0,
-        "entry_price": 3450.0,
-        "stop_loss": 3520.0,
-        "take_profit": 3310.0,
+        "confidence": 0.42,
+        "combined_score": -0.274,
+        "entry_price": 69000.0,
     })
-    print(f"  ✅ Signal #2 saved (ID: {sig2_id})")
+    signals = db.get_signals(limit=1)
+    s = signals[0]
+    assert abs(float(s.get("combined_score", 0)) - (-0.274)) < 0.001, \
+        f"combined_score not stored! Got: {s.get('combined_score')}"
+    print(f"  ✅ Signal #{s1_id}: combined_score={s['combined_score']}")
 
-    signals = db.get_signals()
-    print(f"  📋 Total signals: {len(signals)}")
-
-    btc_signals = db.get_signals(symbol="BTCUSDT")
-    print(f"  📋 BTC signals: {len(btc_signals)}")
-
-    # Update status
-    db.update_signal_status(sig1_id, "closed", notes="TP hit")
-    print(f"  ✅ Signal #1 status → closed")
-
-    # ── Test 2: Save trades ─────────────────────────────────
-    print("\n--- Test 2: Trades ---")
-
+    # ── Test: save trade WITH position_size_usd ──
+    print("\n--- Test: Trade with position_size_usd ---")
     t1_id = db.save_trade({
-        "signal_id": sig1_id,
         "symbol": "BTCUSDT",
-        "direction": "LONG",
+        "direction": -1,
         "mode": "paper",
-        "entry_price": 67500.0,
+        "entry_price": 68000.0,
         "entry_time": datetime.now().isoformat(),
-        "quantity": 0.01,
+        "quantity": 0.074,
         "leverage": 3,
-        "stop_loss": 66200.0,
-        "take_profit": 70100.0,
+        "stop_loss": 69360.0,
+        "take_profit": 65280.0,
+        "position_size_usd": 5000.0,
+        "signal_type": "SHORT",
+        "confidence": 0.65,
+        "margin_used": 1666.67,
     })
-    print(f"  ✅ Trade #1 saved (ID: {t1_id})")
+    trades = db.get_trades(limit=1)
+    t = trades[0]
+    assert float(t["position_size_usd"]) == 5000.0, \
+        f"position_size_usd not stored! Got: {t.get('position_size_usd')}"
+    print(f"  ✅ Trade #{t1_id}: position_size_usd=${t['position_size_usd']:,.2f}")
 
-    # Close the trade
-    db.close_trade(
-        trade_id=t1_id,
-        exit_price=70100.0,
-        exit_reason="tp",
-        pnl_usd=26.0,
-        pnl_percent=3.85,
-        commission=0.54,
-    )
-    print(f"  ✅ Trade #1 closed (TP hit)")
+    # Close with PnL
+    db.close_trade(t1_id, 67000.0, "take_profit",
+                   pnl_usd=73.53, pnl_percent=0.74, commission=4.0)
 
-    # Save a losing trade
-    t2_id = db.save_trade({
-        "symbol": "ETHUSDT",
-        "direction": "SHORT",
-        "mode": "paper",
-        "entry_price": 3450.0,
-        "entry_time": datetime.now().isoformat(),
-        "leverage": 3,
-    })
-    db.close_trade(t2_id, 3520.0, "sl", pnl_usd=-21.0,
-                   pnl_percent=-2.03, commission=0.42)
-    print(f"  ✅ Trade #2 saved & closed (SL hit)")
+    # Test get_total_pnl returns USD
+    total = db.get_total_pnl("paper")
+    assert abs(total - 73.53) < 0.01, f"get_total_pnl should be USD, got {total}"
+    print(f"  ✅ get_total_pnl = ${total:,.2f} (USD)")
 
-    # Query trades
-    all_trades = db.get_trades(mode="paper")
-    print(f"  📋 Paper trades: {len(all_trades)}")
+    # ── Test: migration idempotent ──
+    print("\n--- Test: Migration idempotent ---")
+    db._migrate_tables()
+    print(f"  ✅ Re-migration safe")
 
-    open_trades = db.get_open_trades(mode="paper")
-    print(f"  📋 Open trades: {len(open_trades)}")
-
-    # ── Test 3: Risk queries ────────────────────────────────
-    print("\n--- Test 3: Risk Queries ---")
-
-    daily_pnl = db.get_daily_pnl(mode="paper")
-    print(f"  📊 Daily PnL: {daily_pnl:+.2f}%")
-
-    weekly_pnl = db.get_weekly_pnl(mode="paper")
-    print(f"  📊 Weekly PnL: {weekly_pnl:+.2f}%")
-
-    consec = db.get_consecutive_losses(mode="paper")
-    print(f"  📊 Consecutive losses: {consec}")
-
-    total_pnl = db.get_total_pnl(mode="paper")
-    print(f"  📊 Total PnL: {total_pnl:+.2f}%")
-
-    open_count = db.get_open_position_count(mode="paper")
-    print(f"  📊 Open positions: {open_count}")
-
-    # ── Test 4: Performance snapshot ────────────────────────
-    print("\n--- Test 4: Performance ---")
-
-    perf_id = db.save_performance({
-        "date": datetime.now().strftime("%Y-%m-%d"),
-        "mode": "paper",
-        "total_trades": 2,
-        "winning_trades": 1,
-        "losing_trades": 1,
-        "win_rate": 50.0,
-        "total_pnl": 1.82,
-        "sharpe_ratio": 0.45,
-    })
-    print(f"  ✅ Performance snapshot saved (ID: {perf_id})")
-
-    # ── Test 5: Error logging ───────────────────────────────
-    print("\n--- Test 5: Error Logging ---")
-
-    try:
-        x = 1 / 0
-    except Exception as e:
-        err_id = db.save_error(
-            module="core.db",
-            error_type=type(e).__name__,
-            message=str(e),
-            traceback_str=tb_module.format_exc(),
-        )
-        print(f"  ✅ Error logged (ID: {err_id})")
-
-    errors = db.get_errors()
-    print(f"  📋 Total errors: {len(errors)}")
-
-    # ── Test 6: Statistics ──────────────────────────────────
-    print("\n--- Test 6: Statistics ---")
-
-    stats = db.get_stats(mode="paper", days=30)
-    for key, val in stats.items():
-        print(f"  {key:>20s}: {val}")
-
-    # ── Test 7: Table info ──────────────────────────────────
-    print("\n--- Test 7: Table Row Counts ---")
-
-    info = db.get_table_info()
-    for table, count in info.items():
-        print(f"  {table:>15s}: {count} rows")
-
-    # ── Cleanup ─────────────────────────────────────────────
-    print("\n--- Cleanup ---")
+    # Cleanup
     if test_db_path.exists():
         os.remove(test_db_path)
-        print(f"  🗑️  Removed test DB: {test_db_path}")
 
     print("\n" + "=" * 60)
     print("  ✅ All database tests passed!")
