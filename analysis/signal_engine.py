@@ -560,11 +560,20 @@ class SignalEngine:
     # ══════════════════════════════════════════════════════════════════
     #  COMPONENT: MARKET STRUCTURE
     # ══════════════════════════════════════════════════════════════════
-
     def _get_market_structure_signal(self, dataset: Dict) -> Dict:
         """
-        Multi-timeframe trend alignment.
-        Score = (bullish_signals - bearish_signals) / total_signals.
+        Multi-timeframe trend alignment with timeframe weighting.
+
+        Higher timeframes get more weight for STRUCTURE assessment:
+          1d = 3x weight (trend direction)
+          4h = 2x weight (setup confirmation)
+          1h = 1x weight (entry timing)
+
+        4 checks per timeframe:
+          1. Price vs EMA50 (position)
+          2. EMA21 vs EMA50 (MA alignment)
+          3. EMA21 slope over 5 bars (momentum direction)
+          4. Price change over 10 bars (recent returns)
         """
         weight = SIGNAL_WEIGHTS.get("market_structure", 0.15)
         base = {
@@ -581,9 +590,12 @@ class SignalEngine:
                 base["reason"] = "no_ohlcv_data"
                 return base
 
-            bullish = 0
-            bearish = 0
-            total = 0
+            # Higher TFs matter more for structure
+            tf_weights = {"1h": 1.0, "4h": 2.0, "1d": 3.0}
+
+            weighted_bull = 0.0
+            weighted_bear = 0.0
+            weighted_total = 0.0
             tf_details = {}
 
             for tf_name, df in ohlcv.items():
@@ -592,49 +604,84 @@ class SignalEngine:
 
                 closes = df["close"].astype(float)
                 price = float(closes.iloc[-1])
-                ema21 = float(
-                    closes.ewm(span=21, adjust=False).mean().iloc[-1]
-                )
-                ema50 = float(
-                    closes.ewm(span=50, adjust=False).mean().iloc[-1]
-                )
+                ema21_s = closes.ewm(span=21, adjust=False).mean()
+                ema50_s = closes.ewm(span=50, adjust=False).mean()
 
-                if price > ema50 * 1.005:
-                    bullish += 1
-                    total += 1
+                ema21_now = float(ema21_s.iloc[-1])
+                ema50_now = float(ema50_s.iloc[-1])
+
+                # Weight for this timeframe
+                tw = tf_weights.get(tf_name, 1.0)
+
+                # ── Check 1: Price vs EMA50 ──
+                if price > ema50_now * 1.005:
+                    weighted_bull += tw
                     price_trend = "BULL"
-                elif price < ema50 * 0.995:
-                    bearish += 1
-                    total += 1
+                elif price < ema50_now * 0.995:
+                    weighted_bear += tw
                     price_trend = "BEAR"
                 else:
-                    total += 1
                     price_trend = "FLAT"
+                weighted_total += tw
 
-                if ema21 > ema50 * 1.002:
-                    bullish += 1
-                    total += 1
+                # ── Check 2: EMA21 vs EMA50 ──
+                if ema21_now > ema50_now * 1.002:
+                    weighted_bull += tw
                     ema_trend = "BULL"
-                elif ema21 < ema50 * 0.998:
-                    bearish += 1
-                    total += 1
+                elif ema21_now < ema50_now * 0.998:
+                    weighted_bear += tw
                     ema_trend = "BEAR"
                 else:
-                    total += 1
                     ema_trend = "FLAT"
+                weighted_total += tw
+
+                # ── Check 3: EMA21 slope ──
+                slope_trend = "N/A"
+                lookback = min(5, len(ema21_s) - 1)
+                if lookback >= 3:
+                    ema21_prev = float(ema21_s.iloc[-lookback])
+                    if ema21_prev > 0:
+                        slope_pct = (ema21_now - ema21_prev) / ema21_prev * 100
+                        if slope_pct > 0.1:
+                            weighted_bull += tw
+                            slope_trend = "BULL"
+                        elif slope_pct < -0.1:
+                            weighted_bear += tw
+                            slope_trend = "BEAR"
+                        else:
+                            slope_trend = "FLAT"
+                        weighted_total += tw
+
+                # ── Check 4: Recent price momentum ──
+                momentum_trend = "N/A"
+                if len(closes) > 10:
+                    price_prev = float(closes.iloc[-11])
+                    if price_prev > 0:
+                        ret_pct = (price - price_prev) / price_prev * 100
+                        if ret_pct > 0.5:
+                            weighted_bull += tw
+                            momentum_trend = "BULL"
+                        elif ret_pct < -0.5:
+                            weighted_bear += tw
+                            momentum_trend = "BEAR"
+                        else:
+                            momentum_trend = "FLAT"
+                        weighted_total += tw
 
                 tf_details[tf_name] = {
                     "price_trend": price_trend,
                     "ema_trend": ema_trend,
+                    "slope_trend": slope_trend,
+                    "momentum_trend": momentum_trend,
+                    "weight": tw,
                 }
 
-            if total == 0:
+            if weighted_total == 0:
                 base["reason"] = "insufficient_data"
                 return base
 
-            score = (bullish - bearish) / total
-
-            alignment = max(bullish, bearish) / total
+            score = (weighted_bull - weighted_bear) / weighted_total
+            alignment = max(weighted_bull, weighted_bear) / weighted_total
             confidence = round(alignment, 3)
 
             signal = (
@@ -649,9 +696,9 @@ class SignalEngine:
                 "score": round(score, 4),
                 "signal": signal,
                 "confidence": confidence,
-                "bullish_signals": bullish,
-                "bearish_signals": bearish,
-                "total_signals": total,
+                "bullish_signals": round(weighted_bull, 1),
+                "bearish_signals": round(weighted_bear, 1),
+                "total_signals": round(weighted_total, 1),
                 "alignment_pct": round(alignment * 100, 1),
                 "tf_details": tf_details,
             }
@@ -660,10 +707,6 @@ class SignalEngine:
             base["error"] = str(exc)
             logger.warning(f"    Structure: {exc}")
             return base
-
-    # ══════════════════════════════════════════════════════════════════
-    #  COMBINE ALL COMPONENTS
-    # ══════════════════════════════════════════════════════════════════
 
     def _combine_signals(self, components: Dict[str, Dict]) -> Dict:
         """
@@ -718,13 +761,16 @@ class SignalEngine:
 
         # Agreement
         if direction != 0:
-            agreeing = sum(
-                1
-                for c in available.values()
-                if (c["score"] > 0 and direction > 0)
-                or (c["score"] < 0 and direction < 0)
-            )
-            agreement = agreeing / len(available)
+            strong = [c for c in available.values() if abs(c.get("score", 0)) > 0.05]
+            if strong:
+                agreeing = sum(
+                    1 for c in strong
+                    if (c["score"] > 0 and direction > 0)
+                    or (c["score"] < 0 and direction < 0)
+                )
+                agreement = agreeing / len(strong)
+            else:
+                agreement = 1.0
             confidence = round(
                 confidence * (0.7 + 0.3 * agreement), 3
             )

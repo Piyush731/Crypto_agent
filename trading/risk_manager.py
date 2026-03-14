@@ -162,7 +162,13 @@ class RiskManager:
             symbol = signal.get("symbol", "UNKNOWN")
             direction = signal.get("direction", 0)
             confidence = signal.get("confidence", 0.0)
-            agreement = signal.get("agreement", 1.0)
+            # Use ML model agreement (3-4 models) not component agreement (4-5 components)
+            # Components SHOULD disagree — that's why they have different weights
+            ml_comp = signal.get("components", {}).get("ml_ensemble", {})
+            if ml_comp.get("available") and ml_comp.get("agreement") is not None:
+                agreement = float(ml_comp["agreement"])
+            else:
+                agreement = signal.get("agreement", 1.0)
             entry_price = signal.get("entry_price", 0.0)
 
             if entry_price <= 0:

@@ -58,9 +58,7 @@ def _remove_pid():
         pass
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  LAZY MODULE LOADERS — heavy modules loaded only when needed
-# ═══════════════════════════════════════════════════════════════════════════
+
 
 _cache = {}
 
@@ -134,9 +132,6 @@ def _new_paper_trader(include_ai: bool = None):
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  TERMINAL COLOURS & DISPLAY HELPERS
-# ═══════════════════════════════════════════════════════════════════════════
 
 class C:
     """ANSI colour shortcuts."""
@@ -277,9 +272,6 @@ def _sig_emoji(signal: str) -> str:
     return f"{C.YELLOW}⚪ HOLD{C.RESET}"
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  DISPLAY: SIGNAL RESULT
-# ═══════════════════════════════════════════════════════════════════════════
 
 def _show_signal(r: Dict):
     """Pretty-print a signal from SignalEngine.generate_signal()."""
@@ -359,9 +351,7 @@ def _show_signal(r: Dict):
     print(f"{'═'*60}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  DISPLAY: BACKTEST RESULT
-# ═══════════════════════════════════════════════════════════════════════════
+
 
 def _show_backtest(r: Dict, brief: bool = False):
     if not r.get("success"):
@@ -483,9 +473,6 @@ def _show_train(sym: str, r: Dict, brief: bool = False):
     print(f"{'═'*60}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  STARTUP CHECKS
-# ═══════════════════════════════════════════════════════════════════════════
 
 def _startup_hints():
     """Show helpful hints for first-time users."""
@@ -509,9 +496,7 @@ def _startup_hints():
               f"Train remaining via option 4.{C.RESET}\n")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  MENU ACTIONS  1-13
-# ═══════════════════════════════════════════════════════════════════════════
+
 
 # ────────── 1. Analyze Single Pair ──────────
 
@@ -1265,25 +1250,6 @@ def action_signals():
             print(f"\n  No signals found.")
             return
 
-        # _hdr(f"📡  RECENT SIGNALS" + (f" — {symbol}" if symbol else ""))
-        # print(f"  {'Time':<20s} {'Symbol':<10s} {'Signal':<7s} "
-        #       f"{'Conf':>6s} {'Score':>7s} {'Entry':>10s}")
-        # print(f"  {'─'*20} {'─'*10} {'─'*7} {'─'*6} {'─'*7} {'─'*10}")
-
-        # for sig in signals:
-        #     ts = sig.get("timestamp", "?")
-        #     if isinstance(ts, str) and len(ts) > 19:
-        #         ts = ts[:19]
-        #     sy = sig.get("symbol", "?")
-        #     si_raw = sig.get("direction", "?")
-        #     si = "LONG" if str(si_raw) in ("1", "LONG") else (
-        #          "SHORT" if str(si_raw) in ("-1", "SHORT") else "HOLD")
-        #     co = sig.get("confidence", 0)
-        #     sc = sig.get("combined_score", 0)
-        #     ep = sig.get("entry_price", 0)
-        #     em = "🟢" if si == "LONG" else ("🔴" if si == "SHORT" else "⚪")
-        #     print(f"  {str(ts):<20s} {sy:<10s} {em}{si:<6s} "
-        #           f"{co:>5.1%} {sc:>+6.3f} {_price(ep):>10s}")
         _hdr(f"📡  RECENT SIGNALS" + (f" — {symbol}" if symbol else ""))
         print(f"  {'Time':<20s} {'Symbol':<10s} {'Signal':<7s} "
               f"{'Conf':>6s} {'Score':>7s} {'Entry':>10s}")
@@ -1435,9 +1401,6 @@ def action_db_stats():
         print(f"\n  {C.RED}❌ {e}{C.RESET}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  CLI ARGUMENT PARSER
-# ═══════════════════════════════════════════════════════════════════════════
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -1625,60 +1588,6 @@ def _run_cli(args):
             print(f"  {C.RED}❌ {e}{C.RESET}")
         return True
 
-    # if args.paper:
-    #     include_ai = config.AI_CONFIG["enabled"] and not no_ai
-    #     print(f"\n  🚀 Starting paper trading (Ctrl+C to stop) ...")
-    #     try:
-    #         paper = _new_paper_trader(include_ai)
-    #         if config.TELEGRAM_CONFIG["enabled"]:
-    #             _get("telegram").send_startup(
-    #                 "paper",
-    #                 config.BACKTEST_CONFIG["initial_capital"],
-    #                 config.TRADING_PAIRS,
-    #             )
-    #         paper.start()
-    #         st = paper.get_status()
-    # if args.paper:
-    #     include_ai = config.AI_CONFIG["enabled"] and not no_ai
-    #     print(f"\n  🚀 Starting paper trading (Ctrl+C to stop) ...")
-    #     try:
-    #         paper = _new_paper_trader(include_ai)
-    #         if config.TELEGRAM_CONFIG["enabled"]:
-    #             _get("telegram").send_startup(
-    #                 "paper",
-    #                 config.BACKTEST_CONFIG["initial_capital"],
-    #                 config.TRADING_PAIRS,
-    #             )
-
-    #         # Start Telegram command bot for remote monitoring
-    #         cmd_bot = None
-    #         if config.TELEGRAM_CONFIG["enabled"]:
-    #             try:
-    #                 from notifications.telegram_bot import TelegramCommandBot
-    #                 cmd_bot = TelegramCommandBot()
-    #                 cmd_bot.start()
-    #             except Exception as e:
-    #                 logger.warning(f"Telegram command bot: {e}")
-
-    #         paper.start()
-
-    #         if cmd_bot:
-    #             cmd_bot.stop()
-
-    #         st = paper.get_status()
-            
-    #         print(f"\n  Stopped. Capital: ${st.get('capital',0):,.2f}, "
-    #               f"P&L: {_pnl(st.get('pnl',0))}")
-    #         if config.TELEGRAM_CONFIG["enabled"]:
-    #             _get("telegram").send_shutdown(
-    #                 st.get("capital", 0), st.get("pnl", 0)
-    #             )
-    #     except KeyboardInterrupt:
-    #         print(f"\n  Paper trading stopped by user.")
-    #     except Exception as e:
-    #         logger.error(f"CLI paper failed: {e}", exc_info=True)
-    #         print(f"  {C.RED}❌ {e}{C.RESET}")
-    #     return True
     if args.paper:
         include_ai = config.AI_CONFIG["enabled"] and not no_ai
         print(f"\n  🚀 Starting paper trading (Ctrl+C to stop) ...")
@@ -1751,10 +1660,6 @@ def _run_cli(args):
     return False  # no CLI args → fall through to interactive
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  INTERACTIVE MENU LOOP
-# ═══════════════════════════════════════════════════════════════════════════
-
 _ACTION_MAP = {
     1:  action_analyze,
     2:  action_scan,
@@ -1799,9 +1704,7 @@ def _interactive():
         input(f"\n  {C.DIM}Press Enter to continue...{C.RESET}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  ENTRY POINT
-# ═══════════════════════════════════════════════════════════════════════════
+
 
 def main():
     """Main entry point — CLI args or interactive menu."""

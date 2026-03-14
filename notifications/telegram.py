@@ -377,7 +377,7 @@ class TelegramNotifier:
             direction = trade.get("direction", 0)
             sig = "LONG" if direction == 1 else "SHORT"
             entry = float(trade.get("entry_price", 0))
-            exit_p = float(trade.get("exit_price", 0))
+            exit_p = float(trade.get("exit_price", 0))  
             reason = trade.get("exit_reason", "unknown")
             net_pnl = float(trade.get("net_pnl", trade.get("net_pnl_usd", 0)))
             pnl_pct = float(trade.get("pnl_pct", 0))

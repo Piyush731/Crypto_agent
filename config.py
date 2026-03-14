@@ -18,7 +18,7 @@ load_dotenv()
 BASE_DIR = Path(__file__).parent
 SAVED_MODELS_DIR = BASE_DIR / "saved_models"
 DATA_CACHE_DIR = BASE_DIR / "cache"
-CACHE_DIR = DATA_CACHE_DIR 
+CACHE_DIR = DATA_CACHE_DIR
 LOGS_DIR = BASE_DIR / "logs"
 DB_PATH = BASE_DIR / "agent.db"
 
@@ -40,7 +40,6 @@ TRADING_PAIRS = [
     "ETHUSDT",
     "SOLUSDT",
     "BNBUSDT",
-    # "XRPUSDT",
 ]
 
 PRIMARY_PAIR = "BTCUSDT"
@@ -65,14 +64,12 @@ LOOKBACK_CANDLES = {
 }
 
 # Prediction horizons (in candles of entry timeframe)
-# e.g., if entry=1h, horizon=24 means predict 24h ahead
 PREDICTION_HORIZONS = {
     "intraday": 6,       # 6 hours ahead
     "short_swing": 24,   # 1 day ahead
     "swing": 168,        # 1 week ahead
 }
 
-# Active horizon for predictions
 ACTIVE_HORIZON = "short_swing"
 
 
@@ -105,8 +102,8 @@ FEATURE_CONFIG = {
     "z_score_period": 20,
 
     # ── Feature Selection ──
-    "max_features": 50,              # Top N features to keep
-    "selection_method": "importance", # "importance" or "mutual_info"
+    "max_features": 50,
+    "selection_method": "importance",
     "min_feature_importance": 0.001,
 }
 
@@ -114,12 +111,12 @@ FEATURE_CONFIG = {
 MODEL_CONFIG = {
     # Data split
     "test_size": 0.2,
-    "validation_method": "walk_forward",  # "walk_forward" or "time_series_split"
+    "validation_method": "walk_forward",
     "cv_splits": 5,
 
     # Signal generation
-    "confidence_threshold": 0.55,    # Min confidence to act
-    "min_model_agreement": 0.6,      # Min % of models must agree
+    "confidence_threshold": 0.55,
+    "min_model_agreement": 0.6,
 
     # Individual models + weights
     "models": {
@@ -177,22 +174,19 @@ MODEL_CONFIG = {
     },
 
     # Scaler
-    "scaler": "robust",  # "robust" or "standard" or "minmax"
+    "scaler": "robust",
 }
 
 
 AI_CONFIG = {
     "enabled": bool(HF_TOKEN),
 
-    # Three AI "experts" for reasoning
-    # Uses HF Router API (chat/completions format)
     "models": {
         "analyst": "Qwen/Qwen3-8B",
         "strategist": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
         "risk_manager": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
     },
 
-    # Fallback models if primary ones are busy/rate-limited
     "fallback_models": [
         "Qwen/Qwen3-14B",
         "meta-llama/Llama-3.3-70B-Instruct",
@@ -202,7 +196,7 @@ AI_CONFIG = {
     ],
 
     "max_new_tokens": 500,
-    "temperature": 0.6,          # DeepSeek R1 recommends 0.5-0.7
+    "temperature": 0.6,
     "retry_attempts": 3,
     "retry_delay_seconds": 5,
     "timeout_seconds": 45,
@@ -212,46 +206,44 @@ AI_CONFIG = {
 RISK_CONFIG = {
     # Position sizing
     "max_leverage": 5,
-    "risk_per_trade_pct": 2.0,       # Risk max 2% of capital per trade
-    "max_position_size_pct": 20.0,   # Max 20% of capital in one position
+    "risk_per_trade_pct": 2.0,
+    "max_position_size_pct": 20.0,
     "max_open_positions": 3,
 
-    # Stop-loss / Take-profit (as % from entry)
+    # Stop-loss / Take-profit
     "default_stop_loss_pct": 2.0,
-    "default_take_profit_pct": 3.0,  # 2:1 reward-to-risk
-    "use_atr_stops": True,           # Dynamic SL based on ATR
-    "atr_stop_multiplier": 2.0,     # SL = entry ± (ATR × 2)
+    "default_take_profit_pct": 3.0,
+    "use_atr_stops": True,
+    "atr_stop_multiplier": 2.5,     # ← CHANGED from 2.0 → 2.5 (4/4 trades hit SL; wider stops survive bounces in Extreme Fear volatility)
     "trailing_stop_pct": 3.5,
 
     # Circuit breakers
-    "max_daily_loss_pct": 5.0,       # Pause trading if daily loss > 5%
-    "max_weekly_loss_pct": 10.0,     # Pause trading if weekly loss > 10%
-    "max_total_drawdown_pct": 15.0,  # STOP EVERYTHING if drawdown > 15%
+    "max_daily_loss_pct": 5.0,
+    "max_weekly_loss_pct": 10.0,
+    "max_total_drawdown_pct": 15.0,
     "cooldown_after_loss_minutes": 30,
-    "max_consecutive_losses": 5,     # Pause after 5 losses in a row
+    "max_consecutive_losses": 5,
 
     # Confidence filters
-    "min_confidence_to_trade": 0.15, # Only trade if confidence > 58%  chngx to 65
-    "min_agreement_to_trade": 0.60,  # Only trade if 60%+ models agree
+    "min_confidence_to_trade": 0.15,
+    "min_agreement_to_trade": 0.45,  # ← CHANGED from 0.60 → 0.45 (with 4 models agreement is 0.50/0.75/1.00; old value required 3/4 models = blocked 100% of signals for 20+ hours)
 }
 
 
 BACKTEST_CONFIG = {
     "initial_capital": 10000,
-    "commission_pct": 0.04,          # Binance futures taker fee
-    "slippage_pct": 0.02,           # Estimated slippage
+    "commission_pct": 0.04,
+    "slippage_pct": 0.02,
     "start_date": "2024-01-01",
-    "end_date": None,               # None = up to today
+    "end_date": None,
     "use_leverage": True,
     "default_leverage": 3,
 }
 
 
-
 SENTIMENT_CONFIG = {
     "max_headlines": 30,
 
-    # Data sources (all free)
     "sources": {
         "google_news_rss": True,
         "coindesk_rss": True,
@@ -261,49 +253,44 @@ SENTIMENT_CONFIG = {
         "fear_greed_index": True,
     },
 
-    # FinBERT for financial sentiment
     "finbert_model": "ProsusAI/finbert",
     "use_finbert": True,
-    "fallback_to_keywords": True,     # If FinBERT fails, use keyword method
+    "fallback_to_keywords": True,
 
-    # Sentiment weight in final signal
-    "sentiment_weight": 0.15,         # 15% of final signal
+    "sentiment_weight": 0.15,
 }
 
 
 SIGNAL_WEIGHTS = {
-    "ml_ensemble": 0.45,      # ML models = 45%
-    "sentiment": 0.15,        # News sentiment = 15%
-    "ai_reasoning": 0.15,     # HuggingFace AI = 15%
-    "funding_rate": 0.10,     # Funding rate bias = 10%
-    "market_structure": 0.15, # Trend alignment across timeframes = 15%
+    "ml_ensemble": 0.45,
+    "sentiment": 0.15,
+    "ai_reasoning": 0.15,
+    "funding_rate": 0.10,
+    "market_structure": 0.15,
 }
-# Must sum to 1.0
 assert abs(sum(SIGNAL_WEIGHTS.values()) - 1.0) < 0.01, "Signal weights must sum to 1.0!"
 
 
 TELEGRAM_CONFIG = {
     "enabled": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID),
-    "send_signals": True,            # Send trade signals
-    "send_daily_report": True,       # Daily P&L summary
-    "send_errors": True,             # Send critical errors
-    "send_model_retrain": False,     # Notify on model retraining
-    "quiet_hours": None,             # e.g., (23, 7) to mute 11pm-7am
+    "send_signals": True,
+    "send_daily_report": True,
+    "send_errors": True,
+    "send_model_retrain": False,
+    "quiet_hours": None,
 }
-
 
 
 SCHEDULE_CONFIG = {
-    "analysis_interval_minutes": 60,    # Full analysis every hour
-    "news_check_interval_minutes": 30,  # Sentiment check every 30 min
-    "retrain_interval_hours": 24,       # Retrain ML models daily
-    "heartbeat_interval_minutes": 5,    # "I'm alive" check
+    "analysis_interval_minutes": 60,
+    "news_check_interval_minutes": 30,
+    "retrain_interval_hours": 24,
+    "heartbeat_interval_minutes": 5,
 }
 
 
-
 LOG_CONFIG = {
-    "level": "INFO",                 # DEBUG | INFO | WARNING | ERROR
+    "level": "INFO",
     "to_file": True,
     "to_console": True,
     "log_file": str(LOGS_DIR / "agent.log"),
@@ -315,7 +302,6 @@ LOG_CONFIG = {
 
 
 BINANCE_CONFIG = {
-    # Futures endpoints (public data - no API key required)
     "base_url": "https://fapi.binance.com",
     "klines_endpoint": "/fapi/v1/klines",
     "ticker_endpoint": "/fapi/v1/ticker/24hr",
@@ -323,15 +309,13 @@ BINANCE_CONFIG = {
     "open_interest_endpoint": "/fapi/v1/openInterest",
     "depth_endpoint": "/fapi/v1/depth",
 
-    # Rate limiting (be respectful)
-    "requests_per_minute": 1200,     # Binance limit
-    "our_limit_per_minute": 60,      # Stay well under
+    "requests_per_minute": 1200,
+    "our_limit_per_minute": 60,
     "retry_on_429": True,
     "retry_delay_seconds": 3,
 
-    # Testnet (for paper/live trading later)
     "testnet_url": "https://testnet.binancefuture.com",
-    "use_testnet": True,             # Always testnet until confident
+    "use_testnet": True,
 }
 
 

@@ -120,6 +120,7 @@ class EnsemblePredictor:
         self._min_importance = FEATURE_CONFIG.get("min_feature_importance", 0.001)
         self._conf_threshold = MODEL_CONFIG.get("confidence_threshold", 0.55)
         self._min_agreement = MODEL_CONFIG.get("min_model_agreement", 0.60)
+        self._prob_dampen = 0.65
 
         logger.info(
             f"EnsemblePredictor init | max_features={self._max_features} "
@@ -376,7 +377,11 @@ class EnsemblePredictor:
             if wt == 0:
                 return self._hold("All model predictions failed")
 
+            # prob_up = wp_up / wt
+            # prob_dn = 1.0 - prob_up
             prob_up = wp_up / wt
+            # Dampen overconfident tree probabilities toward 0.5
+            prob_up = 0.5 + (prob_up - 0.5) * self._prob_dampen
             prob_dn = 1.0 - prob_up
 
             # Direction + confidence
@@ -464,8 +469,13 @@ class EnsemblePredictor:
             if wt > 0:
                 w_proba /= wt
 
+            # p_up = w_proba[:, 1]
+            # p_dn = w_proba[:, 0]
             p_up = w_proba[:, 1]
-            p_dn = w_proba[:, 0]
+            # Dampen overconfident tree probabilities (matches single predict)
+            p_up = 0.5 + (p_up - 0.5) * self._prob_dampen
+            p_dn = 1.0 - p_up
+
             preds = (p_up >= 0.5).astype(int)
             conf = np.maximum(p_up, p_dn)
 

@@ -15,6 +15,7 @@ FIX LOG (v3.0.1):
 
 import time
 import json
+import signal as _signal
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -137,19 +138,38 @@ class PaperTrader:
 
                 highest = entry_price
                 lowest = entry_price
+                current_stop = stop_loss
+
+                # Load saved state from DB notes (survives restarts)
+                notes_str = trade.get("notes", "")
+                if notes_str:
+                    try:
+                        saved = json.loads(notes_str)
+                        if isinstance(saved, dict):
+                            highest = float(saved.get("highest_price", highest))
+                            lowest = float(saved.get("lowest_price", lowest))
+                            current_stop = float(saved.get("current_stop", stop_loss))
+                            logger.info(
+                                f"  [{symbol}] Restored state: "
+                                f"stop={current_stop:.2f} high={highest:.2f} low={lowest:.2f}"
+                            )
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        pass
+
+                # Also update with current live price
                 try:
                     ticker = self.binance.get_ticker(symbol)
                     if ticker and ticker.get("last_price"):
                         current = float(ticker["last_price"])
-                        highest = max(entry_price, current)
-                        lowest = min(entry_price, current)
+                        highest = max(highest, current)
+                        lowest = min(lowest, current)
                 except Exception:
                     pass
 
                 self._position_state[trade_id] = {
                     "highest_price": highest,
                     "lowest_price": lowest,
-                    "current_stop": stop_loss,
+                    "current_stop": current_stop,
                 }
 
             logger.info(
@@ -162,10 +182,74 @@ class PaperTrader:
     #  START / STOP
     # ═══════════════════════════════════════════════════════════
 
+    # def start(self, max_cycles: int = None):
+    #     """Main continuous trading loop."""
+    #     self._running = True
+    #     interval_s = SCHEDULE_CONFIG["analysis_interval_minutes"] * 60
+
+    #     logger.info(
+    #         f"{'═'*50}\n"
+    #         f"  PAPER TRADER STARTING\n"
+    #         f"  Capital: ${self.risk_mgr.get_capital():,.2f}\n"
+    #         f"  Pairs: {TRADING_PAIRS}\n"
+    #         f"  Interval: {interval_s // 60} min\n"
+    #         f"  AI: {'ON' if self.include_ai else 'OFF'}\n"
+    #         f"  Max cycles: {max_cycles or '∞'}\n"
+    #         f"{'═'*50}"
+    #     )
+
+    #     cycle = 0
+    #     while self._running:
+    #         if max_cycles is not None and cycle >= max_cycles:
+    #             logger.info(f"Reached max_cycles={max_cycles} — stopping")
+    #             break
+
+    #         try:
+    #             self.run_cycle()
+    #             cycle += 1
+
+    #             if self._running and (max_cycles is None or cycle < max_cycles):
+    #                 logger.info(
+    #                     f"Next cycle in {interval_s // 60} min "
+    #                     f"(cycle {cycle}/{max_cycles or '∞'})…"
+    #                 )
+    #                 for _ in range(interval_s):
+    #                     if not self._running:
+    #                         break
+    #                     time.sleep(1)
+
+    #         except KeyboardInterrupt:
+    #             logger.info("Paper trader interrupted (Ctrl+C)")
+    #             self._running = False
+
+    #         except Exception as e:
+    #             logger.error(f"Cycle error: {e}", exc_info=True)
+    #             self.db.save_error("paper_trader", "cycle_error", str(e))
+    #             for _ in range(60):
+    #                 if not self._running:
+    #                     break
+    #                 time.sleep(1)
+
+    #     self._running = False
+    #     logger.info(
+    #         f"Paper trader stopped after {cycle} cycles | "
+    #         f"capital=${self.risk_mgr.get_capital():,.2f}"
+    #     )
     def start(self, max_cycles: int = None):
-        """Main continuous trading loop."""
+        """Main continuous trading loop with crash recovery."""
         self._running = True
         interval_s = SCHEDULE_CONFIG["analysis_interval_minutes"] * 60
+
+        # Register signal handlers for graceful shutdown
+        def _handle_signal(signum, frame):
+            logger.info(f"Signal {signum} received — shutting down gracefully")
+            self._running = False
+
+        try:
+            _signal.signal(_signal.SIGTERM, _handle_signal)
+            _signal.signal(_signal.SIGINT, _handle_signal)
+        except Exception:
+            pass  # May fail in non-main thread
 
         logger.info(
             f"{'═'*50}\n"
@@ -179,43 +263,63 @@ class PaperTrader:
         )
 
         cycle = 0
-        while self._running:
-            if max_cycles is not None and cycle >= max_cycles:
-                logger.info(f"Reached max_cycles={max_cycles} — stopping")
-                break
+        try:
+            while self._running:
+                if max_cycles is not None and cycle >= max_cycles:
+                    logger.info(f"Reached max_cycles={max_cycles} — stopping")
+                    break
 
-            try:
-                self.run_cycle()
-                cycle += 1
+                try:
+                    self.run_cycle()
+                    cycle += 1
 
-                if self._running and (max_cycles is None or cycle < max_cycles):
-                    logger.info(
-                        f"Next cycle in {interval_s // 60} min "
-                        f"(cycle {cycle}/{max_cycles or '∞'})…"
-                    )
-                    for _ in range(interval_s):
+                    if self._running and (max_cycles is None or cycle < max_cycles):
+                        logger.info(
+                            f"Next cycle in {interval_s // 60} min "
+                            f"(cycle {cycle}/{max_cycles or '∞'})…"
+                        )
+                        for _ in range(interval_s):
+                            if not self._running:
+                                break
+                            time.sleep(1)
+
+                except KeyboardInterrupt:
+                    logger.info("Paper trader interrupted (Ctrl+C)")
+                    self._running = False
+
+                except Exception as e:
+                    logger.error(f"Cycle error: {e}", exc_info=True)
+                    self.db.save_error("paper_trader", "cycle_error", str(e))
+
+                    # Notify via Telegram
+                    try:
+                        from notifications.telegram import get_notifier
+                        get_notifier().send_error("paper_trader", "cycle_error", str(e))
+                    except Exception:
+                        pass
+
+                    # Wait 60s before retrying (not full interval)
+                    for _ in range(60):
                         if not self._running:
                             break
                         time.sleep(1)
 
-            except KeyboardInterrupt:
-                logger.info("Paper trader interrupted (Ctrl+C)")
-                self._running = False
+        except Exception as fatal:
+            logger.critical(f"FATAL paper trader crash: {fatal}", exc_info=True)
+            self.db.save_error("paper_trader", "fatal_crash", str(fatal))
+            try:
+                from notifications.telegram import get_notifier
+                get_notifier().send_error("paper_trader", "FATAL_CRASH", str(fatal))
+            except Exception:
+                pass
 
-            except Exception as e:
-                logger.error(f"Cycle error: {e}", exc_info=True)
-                self.db.save_error("paper_trader", "cycle_error", str(e))
-                for _ in range(60):
-                    if not self._running:
-                        break
-                    time.sleep(1)
-
-        self._running = False
-        logger.info(
-            f"Paper trader stopped after {cycle} cycles | "
-            f"capital=${self.risk_mgr.get_capital():,.2f}"
-        )
-
+        finally:
+            self._running = False
+            logger.info(
+                f"Paper trader stopped after {cycle} cycles | "
+                f"capital=${self.risk_mgr.get_capital():,.2f}"
+            )
+   
     def stop(self):
         """Request graceful shutdown."""
         self._running = False
@@ -354,6 +458,17 @@ class PaperTrader:
                 state["current_stop"] = exit_check.get(
                     "new_trailing_stop", state["current_stop"]
                 )
+
+                try:
+                    self.db.update_trade(trade_id, {
+                        "notes": json.dumps({
+                            "current_stop": round(state["current_stop"], 8),
+                            "highest_price": round(state["highest_price"], 8),
+                            "lowest_price": round(state["lowest_price"], 8),
+                        })
+                    })
+                except Exception:
+                    pass
 
                 if exit_check["should_exit"]:
                     exit_price = exit_check.get("exit_price", current_price)
