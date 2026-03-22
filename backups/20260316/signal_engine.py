@@ -49,7 +49,7 @@ class SignalEngine:
     Final signal: LONG (score > threshold), SHORT (score < -threshold), HOLD otherwise.
     """
 
-    SIGNAL_THRESHOLD = 0.12  # Min |combined_score| to generate LONG/SHORT
+    SIGNAL_THRESHOLD = 0.15  # Min |combined_score| to generate LONG/SHORT
 
     def __init__(self):
         self.brain = AIBrain()
@@ -337,20 +337,6 @@ class SignalEngine:
 
             prob_up = prediction.get("probability_up", 0.5)
             score = (prob_up - 0.5) * 2.0  # [-1, +1]
-
-            # ══ FIX: Cap ML score when extreme/overfit detected ══
-            # When all 4 models unanimously predict extreme probabilities,
-            # the ML is probably overfitting. Cap its influence so other
-            # components (Structure, Sentiment) can drive the signal.
-            if prediction.get("extreme_detected"):
-                max_ml_score = 0.15
-                if abs(score) > max_ml_score:
-                    old = score
-                    score = max_ml_score if score > 0 else -max_ml_score
-                    logger.info(
-                        f"    ML score capped: {old:+.3f} → {score:+.3f} "
-                        f"(extreme/overfit, raw_p_up={prediction.get('raw_probability_up', '?')})"
-                    )
 
             return {
                 "weight": weight,
@@ -776,7 +762,7 @@ class SignalEngine:
             direction = 0
 
         # Confidence from score magnitude
-        confidence = round(min(1.0, abs_score * 2.5), 3)
+        confidence = round(min(1.0, abs_score * 1.5), 3)
 
         # Agreement calculation
         if direction != 0:
@@ -812,7 +798,7 @@ class SignalEngine:
                     and abs(struct_s) > 0.25):
                 conflict_detected = True
                 old_conf = confidence
-                confidence = round(confidence * 0.5, 3)  # Moderate penalty
+                confidence = round(confidence * 0.4, 3)  # Severe penalty
                 logger.info(
                     f"  ⚠️ ML/Structure CONFLICT: "
                     f"ML={ml_s:+.3f} vs Struct={struct_s:+.3f} → "
@@ -820,7 +806,7 @@ class SignalEngine:
                 )
 
         # ══ NEW: Require minimum agreement for non-HOLD ══
-        if direction != 0 and agreement < 0.3:
+        if direction != 0 and agreement < 0.4:
             logger.info(
                 f"  ⚠️ Low agreement ({agreement:.2f}) — forcing HOLD"
             )

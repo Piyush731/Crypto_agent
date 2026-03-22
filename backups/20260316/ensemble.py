@@ -429,8 +429,6 @@ class EnsemblePredictor:
                 "probability_down": round(prob_dn, 4),
                 "per_model": per_model,
                 "model_count": len(per_model),
-                "extreme_detected": (raw_prob_up < 0.15 or raw_prob_up > 0.85),
-                "raw_probability_up": round(raw_prob_up, 4),
             }
 
         except Exception as exc:

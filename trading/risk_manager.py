@@ -65,6 +65,14 @@ class RiskManager:
         self.atr_sl_multiplier = RISK_CONFIG["atr_stop_multiplier"]
         self.trailing_stop_pct = RISK_CONFIG["trailing_stop_pct"]
 
+        #14th after gains updates below - gain locks
+
+        self._trailing_tiers = sorted(
+            RISK_CONFIG.get("trailing_stop_tiers", []),
+            key=lambda t: t["min_profit_pct"],
+            reverse=True,
+        )
+
         self.max_daily_loss_pct = RISK_CONFIG["max_daily_loss_pct"]
         self.max_weekly_loss_pct = RISK_CONFIG["max_weekly_loss_pct"]
         self.max_total_dd_pct = RISK_CONFIG["max_total_drawdown_pct"]
@@ -547,6 +555,68 @@ class RiskManager:
     #  TRAILING STOP
     # ═══════════════════════════════════════════════════════════════════
 
+ ##   def calculate_trailing_stop(
+ ##       self,
+ ##       entry_price: float,
+ ##       current_price: float,
+ ##       direction: int,
+ ##       current_stop: float,
+ ##       highest_price: float = None,
+ ##       lowest_price: float = None,
+ ##   ) -> Dict:
+ ##       """
+ ##       Calculate trailing stop level.
+
+ ##       Trailing stop only moves in the direction of profit, never backwards.
+
+ ##       Args:
+ ##           entry_price:   Original entry price
+ ##           current_price: Current market price
+ ##           direction:     1 = LONG, -1 = SHORT
+ ##           current_stop:  Current stop-loss level
+ ##           highest_price: Highest price since entry (LONG)
+ ##           lowest_price:  Lowest price since entry (SHORT)
+
+ ##       Returns:
+ ##           Dict: new_stop, triggered, moved, pnl_pct
+ ##       """
+ ##       try:
+ ##           trail_frac = self.trailing_stop_pct / 100.0
+
+ ##           if direction == 1:  # LONG
+ ##               ref = highest_price if highest_price else max(current_price, entry_price)
+ ##               new_stop = ref * (1.0 - trail_frac)
+ ##               new_stop = max(new_stop, current_stop)  # Never move down
+ ##               triggered = current_price <= new_stop
+ ##           else:  # SHORT
+ ##               ref = lowest_price if lowest_price else min(current_price, entry_price)
+ ##               new_stop = ref * (1.0 + trail_frac)
+ ##               new_stop = min(new_stop, current_stop)  # Never move up
+ ##               triggered = current_price >= new_stop
+
+ ##           moved = abs(new_stop - current_stop) > 1e-10
+ ##           pnl_pct = ((current_price - entry_price) / entry_price * 100.0) * direction
+
+ ##           return {
+ ##               "new_stop": round(new_stop, 8),
+ ##               "triggered": triggered,
+ ##               "moved": moved,
+ ##               "ref_price": round(ref, 8),
+ ##               "pnl_pct": round(pnl_pct, 4),
+ ##           }
+
+ ##       except Exception as e:
+ ##           logger.error(f"Trailing stop error: {e}")
+ ##           return {
+ ##               "new_stop": current_stop,
+ ##               "triggered": False,
+ ##               "moved": False,
+ ##               "ref_price": current_price,
+ ##               "pnl_pct": 0.0,
+ ##           } 
+
+
+  #14th after gain - gains lock mechanism update
     def calculate_trailing_stop(
         self,
         entry_price: float,
@@ -557,37 +627,52 @@ class RiskManager:
         lowest_price: float = None,
     ) -> Dict:
         """
-        Calculate trailing stop level.
+        Adaptive trailing stop — tightens as profit grows.
 
-        Trailing stop only moves in the direction of profit, never backwards.
+        Tiers (from config):
+          profit < 1.5%  → 3.5% trail (wide, room to breathe)
+          profit 1.5-2.5% → 2.0% trail (protect breakeven)
+          profit 2.5-3.5% → 1.5% trail (lock real profit)
+          profit > 3.5%   → 1.0% trail (tight, near TP)
 
-        Args:
-            entry_price:   Original entry price
-            current_price: Current market price
-            direction:     1 = LONG, -1 = SHORT
-            current_stop:  Current stop-loss level
-            highest_price: Highest price since entry (LONG)
-            lowest_price:  Lowest price since entry (SHORT)
-
-        Returns:
-            Dict: new_stop, triggered, moved, pnl_pct
+        Stop only moves in profit direction, never backwards.
         """
         try:
-            trail_frac = self.trailing_stop_pct / 100.0
-
+            # Determine reference price (peak profit point)
             if direction == 1:  # LONG
                 ref = highest_price if highest_price else max(current_price, entry_price)
+                profit_pct = (ref - entry_price) / entry_price * 100.0 if entry_price > 0 else 0.0
+            else:  # SHORT
+                ref = lowest_price if lowest_price else min(current_price, entry_price)
+                profit_pct = (entry_price - ref) / entry_price * 100.0 if entry_price > 0 else 0.0
+
+            # Adaptive trailing distance based on profit tier
+            trail_frac = self.trailing_stop_pct / 100.0  # default fallback
+            tier_used = "default"
+            for tier in self._trailing_tiers:  # sorted highest-first
+                if profit_pct >= tier["min_profit_pct"]:
+                    trail_frac = tier["trail_pct"] / 100.0
+                    tier_used = f"{tier['trail_pct']}%@{tier['min_profit_pct']}%"
+                    break
+
+            # Calculate new stop
+            if direction == 1:  # LONG
                 new_stop = ref * (1.0 - trail_frac)
                 new_stop = max(new_stop, current_stop)  # Never move down
                 triggered = current_price <= new_stop
             else:  # SHORT
-                ref = lowest_price if lowest_price else min(current_price, entry_price)
                 new_stop = ref * (1.0 + trail_frac)
                 new_stop = min(new_stop, current_stop)  # Never move up
                 triggered = current_price >= new_stop
 
             moved = abs(new_stop - current_stop) > 1e-10
             pnl_pct = ((current_price - entry_price) / entry_price * 100.0) * direction
+
+            if moved:
+                logger.debug(
+                    f"Trailing stop moved: profit={profit_pct:.2f}% tier={tier_used} "
+                    f"trail={trail_frac*100:.1f}% stop={current_stop:.2f}→{new_stop:.2f}"
+                )
 
             return {
                 "new_stop": round(new_stop, 8),
@@ -606,7 +691,6 @@ class RiskManager:
                 "ref_price": current_price,
                 "pnl_pct": 0.0,
             }
-
     # ═══════════════════════════════════════════════════════════════════
     #  EXIT CONDITION CHECKS
     # ═══════════════════════════════════════════════════════════════════

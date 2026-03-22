@@ -60,8 +60,7 @@ LOOKBACK_CANDLES = {
     "1m": 1000,
     "5m": 1000,
     "15m": 1000,
-    #  was 750 before 1 hr one okay
-    "1h": 2500,
+    "1h": 720,
     "4h": 500,
     "1d": 365,
     "1w": 104,
@@ -102,8 +101,7 @@ FEATURE_CONFIG = {
     "lag_periods": [1, 2, 3, 5],
     "z_score_period": 20,
 
-    #  was 5 before - ML can handle more, and we want to capture more nuance
-    "max_features": 35, 
+    "max_features": 50,
     "selection_method": "importance",
     "min_feature_importance": 0.001,
 }
@@ -136,10 +134,8 @@ MODEL_CONFIG = {
             "weight": 0.30,
             "params": {
                 "n_estimators": 200,
-                # max dept was 6 before updatesd 21st amrch  around 19:32 alsoa dded amx child weight and regularization to combat overfitting
-                "max_depth": 4,
+                "max_depth": 6,
                 "learning_rate": 0.05,
-                "min_child_weight": 10,
                 "subsample": 0.8,
                 "colsample_bytree": 0.8,
                 "reg_alpha": 0.1,
@@ -234,7 +230,7 @@ RISK_CONFIG = {
     "max_consecutive_losses": 3,          # ← TIGHTENED from 5 → 3
 
     # ══ CONFIDENCE FILTERS — THE MAIN FIX ══
-    "min_confidence_to_trade": 0.30,      # ← CRITICAL FIX: was 0.15 (!!!)
+    "min_confidence_to_trade": 0.55,      # ← CRITICAL FIX: was 0.15 (!!!)
     "min_agreement_to_trade": 0.60,       # ← RESTORED from 0.45 → 0.60
 
     # ── NEW: Correlation limits ──
@@ -362,8 +358,8 @@ def validate_config():
     if RISK_CONFIG["risk_per_trade_pct"] > 10:
         errors.append("risk_per_trade_pct > 10% is extremely dangerous")
 
-    if RISK_CONFIG["min_confidence_to_trade"] < 0.20:
-            errors.append(f"min_confidence_to_trade={RISK_CONFIG['min_confidence_to_trade']} is too low! Minimum 0.20")
+    if RISK_CONFIG["min_confidence_to_trade"] < 0.40:
+        errors.append(f"min_confidence_to_trade={RISK_CONFIG['min_confidence_to_trade']} is too low! Minimum 0.40")
 
     total_weight = sum(
         m["weight"] for m in MODEL_CONFIG["models"].values() if m["enabled"]
