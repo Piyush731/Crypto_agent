@@ -55,6 +55,9 @@ def test_builder_is_aligned_and_purged_metadata_exists(tmp_path):
     assert result["features"].index.equals(result["target_end_time"].index)
     assert (result["target_end_time"] > result["features"].index).all()
     assert set(result["target"].unique()).issubset({-1, 0, 1})
+    assert "tf15_breakout_high20_pct" in result["features"].columns
+    assert "tf15_breakout_low20_pct" in result["features"].columns
+    assert "tf15_volume_ratio20" in result["features"].columns
 
 
 def test_future_hour_change_cannot_affect_earlier_decision(tmp_path):

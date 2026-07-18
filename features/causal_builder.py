@@ -94,6 +94,17 @@ def timeframe_features(frame: pd.DataFrame, prefix: str) -> pd.DataFrame:
     result[f"{prefix}_macd_hist"] = macd_histogram(close)
     result[f"{prefix}_atr_pct"] = atr14 / close.replace(0, np.nan) * 100
     result[f"{prefix}_adx14"] = adx(frame, 14)
+    prior_high_20 = frame["high"].shift(1).rolling(20, min_periods=20).max()
+    prior_low_20 = frame["low"].shift(1).rolling(20, min_periods=20).min()
+    result[f"{prefix}_breakout_high20_pct"] = (
+        close / prior_high_20.replace(0, np.nan) - 1
+    ) * 100
+    result[f"{prefix}_breakout_low20_pct"] = (
+        close / prior_low_20.replace(0, np.nan) - 1
+    ) * 100
+    result[f"{prefix}_volume_ratio20"] = frame["volume"] / frame["volume"].rolling(
+        20, min_periods=20
+    ).mean().replace(0, np.nan)
     return result
 
 

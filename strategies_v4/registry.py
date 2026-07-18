@@ -2,10 +2,12 @@
 
 from strategies_v4.triple_barrier import TripleBarrierStrategy
 from strategies_v4.trend_alignment import TrendAlignmentStrategy
+from strategies_v4.donchian_15m import Donchian15mStrategy
 
 STRATEGIES = {
     "triple_barrier_5m_v1": TripleBarrierStrategy,
     "trend_alignment_5m_v1": TrendAlignmentStrategy,
+    "donchian_15m_v1": Donchian15mStrategy,
 }
 
 
