@@ -101,7 +101,10 @@ def gap_report(frame: pd.DataFrame, minutes: int = 5) -> dict:
     if len(frame) < 2:
         return {"rows": len(frame), "gaps": 0, "missing_bars": 0}
     deltas = frame.index.to_series().diff().dropna()
-    expected = pd.Timedelta(minutes=minutes)
+    expected = pd.to_timedelta(
+        minutes,
+        unit="min",
+    )
     gap_deltas = deltas[deltas > expected]
     missing = int(sum(max(int(delta / expected) - 1, 0) for delta in gap_deltas))
     return {
@@ -111,7 +114,7 @@ def gap_report(frame: pd.DataFrame, minutes: int = 5) -> dict:
         "gaps": len(gap_deltas),
         "missing_bars": missing,
         "max_gap_minutes": (
-            float(gap_deltas.max() / pd.Timedelta(minutes=1))
+            float(gap_deltas.max() / pd.to_timedelta( 1,  unit="min",))
             if not gap_deltas.empty
             else 0.0
         ),
