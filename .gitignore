@@ -1,16 +1,44 @@
+# Secrets and local environments
 .env
 .env.*
+!.env.example
+!.env.v4.example
 *.env
-*.swp
-*.swo
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+.venv/
 venv/
 env/
-.venv/
+
+# Python/runtime artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pid
 *.log
+nohup.out
+
+# Databases and backups
+*.db
+*.db-*
+*.db.*
+*.sqlite
+*.sqlite3
+*.bak
+*.backup
+backups/
+
+# Research/runtime artifacts that must not enter Git
+cache/
+saved_models/
+models/saved/
+research_results/*
+!research_results/.gitignore
+!research_results/.gitkeep
+
+# Editor/OS/temp
+*.swp
+*.swo
 .DS_Store
 Thumbs.db
 .vscode/
@@ -19,24 +47,7 @@ Thumbs.db
 *.temp
 PROJECT_PROMPT.md
 contextPrompt.txt
-*.db
-*.db.*
-*.bak
-*.pid
-cache/
-logs/
-backups/
-saved_models/
-*.pkl
-*.joblib
-.env
-.env.*
-*.key
-*.pem
-temp.txt
 oldconfig.txt
-nohup.out
+temp.txt
 
-market_data.db
-market_data.db-shm
-market_data.db-wal
+logs/

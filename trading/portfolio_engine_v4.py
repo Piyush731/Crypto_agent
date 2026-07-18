@@ -30,6 +30,33 @@ class PortfolioEngineV4:
         if timeline.empty:
             raise ValueError("No common 5m execution timeline")
 
+        # A schedule timestamp is the instant when the completed 1h inputs
+        # become available. Filling at the 5m open with that same timestamp
+        # would use a price that existed before the signal was knowable. Map
+        # every signal to the first common 5m bar strictly after availability.
+        execution_rows = []
+        for signal_time, row in schedule.sort_index().iterrows():
+            execution_position = timeline.searchsorted(signal_time, side="right")
+            if execution_position >= len(timeline):
+                continue
+            execution_time = timeline[execution_position]
+            if execution_time > development_end:
+                continue
+            execution_row = row.copy()
+            execution_row["signal_time"] = signal_time
+            execution_row.name = execution_time
+            execution_rows.append(execution_row)
+        execution_schedule = (
+            pd.DataFrame(execution_rows)
+            if execution_rows
+            else pd.DataFrame()
+        )
+        if not execution_schedule.empty:
+            execution_schedule.index.name = "execution_time"
+            execution_schedule = execution_schedule[
+                ~execution_schedule.index.duplicated(keep="last")
+            ]
+
         capital = self.starting_capital
         positions: dict[str, dict] = {}
         trades = []
@@ -69,8 +96,9 @@ class PortfolioEngineV4:
         for timestamp in timeline:
             current_bars = {symbol: frame.loc[timestamp] for symbol, frame in bars.items()}
 
-            if timestamp in schedule.index:
-                row = schedule.loc[timestamp]
+            if timestamp in execution_schedule.index:
+                row = execution_schedule.loc[timestamp]
+                signal_time = row["signal_time"]
                 desired = {}
                 if pd.notna(row.get("long_symbol")) and row.get("long_symbol"):
                     desired[str(row["long_symbol"])] = (1, float(row["long_atr_pct"]))
@@ -112,6 +140,7 @@ class PortfolioEngineV4:
                     notional = quantity * fill
                     positions[symbol] = {
                         "direction": direction,
+                        "signal_time": signal_time,
                         "entry_time": timestamp,
                         "entry_price": fill,
                         "quantity": quantity,
