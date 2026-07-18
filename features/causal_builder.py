@@ -102,9 +102,23 @@ def timeframe_features(frame: pd.DataFrame, prefix: str) -> pd.DataFrame:
     result[f"{prefix}_breakout_low20_pct"] = (
         close / prior_low_20.replace(0, np.nan) - 1
     ) * 100
+    prior_high_55 = frame["high"].shift(1).rolling(55, min_periods=55).max()
+    prior_low_55 = frame["low"].shift(1).rolling(55, min_periods=55).min()
+    result[f"{prefix}_breakout_high55_pct"] = (
+        close / prior_high_55.replace(0, np.nan) - 1
+    ) * 100
+    result[f"{prefix}_breakout_low55_pct"] = (
+        close / prior_low_55.replace(0, np.nan) - 1
+    ) * 100
     result[f"{prefix}_volume_ratio20"] = frame["volume"] / frame["volume"].rolling(
         20, min_periods=20
     ).mean().replace(0, np.nan)
+    middle = close.rolling(20, min_periods=20).mean()
+    std = close.rolling(20, min_periods=20).std()
+    upper = middle + 2 * std
+    lower = middle - 2 * std
+    width = (upper - lower).replace(0, np.nan)
+    result[f"{prefix}_bb_pct_b"] = (close - lower) / width
     return result
 
 
