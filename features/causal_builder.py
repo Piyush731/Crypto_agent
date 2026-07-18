@@ -14,9 +14,9 @@ from core.market_store import MarketStore
 class CausalFeatureConfig:
     horizon_bars: int = 48          # 4 hours on 5m bars
     neutral_return: float = 0.003   # +/-0.30% => HOLD class
-    base_interval: pd.Timedelta = pd.Timedelta(minutes=5)
-    setup_interval: pd.Timedelta = pd.Timedelta(minutes=15)
-    trend_interval: pd.Timedelta = pd.Timedelta(hours=1)
+    base_interval: pd.Timedelta = pd.to_timedelta(5, unit="min")
+    setup_interval: pd.Timedelta = pd.to_timedelta(15, unit="min")
+    trend_interval: pd.Timedelta = pd.to_timedelta(1, unit="h")
 
 
 def rsi(series: pd.Series, period: int = 14) -> pd.Series:
@@ -139,7 +139,7 @@ def base_features(frame: pd.DataFrame) -> pd.DataFrame:
     result["range_pct"] = candle_range / close.replace(0, np.nan) * 100
     result["close_location"] = (close - frame["low"]) / candle_range
 
-    decision_index = frame.index + pd.Timedelta(minutes=5)
+    decision_index = frame.index + pd.to_timedelta(5, unit="min")
     result.index = decision_index
     result["hour_sin"] = np.sin(2 * np.pi * result.index.hour / 24)
     result["hour_cos"] = np.cos(2 * np.pi * result.index.hour / 24)

@@ -68,7 +68,7 @@ def test_future_hour_change_cannot_affect_earlier_decision(tmp_path):
     store.upsert_candles("okx", "BTC-USDT-SWAP", "1h", one_hour.loc[[last_time]])
 
     second = builder.build("BTC-USDT-SWAP", include_target=False)["features"]
-    cutoff = last_time + pd.Timedelta(hours=1)
+    cutoff = last_time + pd.to_timedelta(1, unit="h")
     common = first.index.intersection(second.index)
     earlier = common[common < cutoff]
     pd.testing.assert_frame_equal(first.loc[earlier], second.loc[earlier])
