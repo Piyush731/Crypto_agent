@@ -1,11 +1,13 @@
 """Explicit registry for shared-capital strategy trials."""
 
+from portfolio_v4.cost_aware_dual_trend import CostAwareDualTrend
 from portfolio_v4.cross_sectional_momentum import CrossSectionalMomentum
 from portfolio_v4.cross_sectional_momentum_8h import CrossSectionalMomentum8h
 
 PORTFOLIO_STRATEGIES = {
     "cross_sectional_momentum_4h_v1": CrossSectionalMomentum,
     "cross_sectional_momentum_8h_v1": CrossSectionalMomentum8h,
+    "cost_aware_dual_trend_8h_v1": CostAwareDualTrend,
 }
 
 

@@ -11,11 +11,14 @@ from trading.portfolio_engine_v4 import PortfolioEngineV4
 
 def run(db: Path, output: Path, strategy_key: str):
     store = MarketStore(db)
+    strategy = get_portfolio_strategy(strategy_key)
+    default_symbols = ("BTC", "ETH", "SOL", "BNB")
+    requested_symbols = tuple(
+        getattr(strategy, "candidate_symbols", default_symbols)
+    )
     symbols = {
-        "BTC": "BTC-USDT-SWAP",
-        "ETH": "ETH-USDT-SWAP",
-        "SOL": "SOL-USDT-SWAP",
-        "BNB": "BNB-USDT-SWAP",
+        symbol: f"{symbol}-USDT-SWAP"
+        for symbol in requested_symbols
     }
     hourly = {
         symbol: store.get_candles("okx", instrument, "1h", completed_only=True)
@@ -33,7 +36,13 @@ def run(db: Path, output: Path, strategy_key: str):
     cutoff_position = int(len(common) * 0.80)
     development_end = common[cutoff_position - 1]
 
-    strategy = get_portfolio_strategy(strategy_key)
+    missing_hourly = [symbol for symbol, frame in hourly.items() if frame.empty]
+    missing_five = [symbol for symbol, frame in five_minute.items() if frame.empty]
+    if missing_hourly or missing_five:
+        raise RuntimeError(
+            f"Missing strategy data: 1h={missing_hourly}, 5m={missing_five}"
+        )
+
     schedule = strategy.build_schedule(hourly)
     schedule = schedule[schedule.index <= development_end]
     result = PortfolioEngineV4().run(
@@ -46,6 +55,7 @@ def run(db: Path, output: Path, strategy_key: str):
         "development_end": development_end.isoformat(),
         "reserved_holdout_start": common[cutoff_position].isoformat(),
         "strategy_key": strategy_key,
+        "symbols": list(symbols),
         "strategy": result["strategy"],
         "schedule_rows": len(schedule),
         "metrics": result["metrics"],
