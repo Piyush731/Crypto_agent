@@ -1,17 +1,15 @@
-"""Run the pre-registered cross-sectional momentum development trial."""
+"""Run one pre-registered shared-capital portfolio strategy on development data."""
 
 import argparse
 import json
 from pathlib import Path
 
-import pandas as pd
-
 from core.market_store import MarketStore
-from portfolio_v4.cross_sectional_momentum import CrossSectionalMomentum
+from portfolio_v4.registry import get_portfolio_strategy
 from trading.portfolio_engine_v4 import PortfolioEngineV4
 
 
-def run(db: Path, output: Path):
+def run(db: Path, output: Path, strategy_key: str):
     store = MarketStore(db)
     symbols = {
         "BTC": "BTC-USDT-SWAP",
@@ -35,7 +33,7 @@ def run(db: Path, output: Path):
     cutoff_position = int(len(common) * 0.80)
     development_end = common[cutoff_position - 1]
 
-    strategy = CrossSectionalMomentum()
+    strategy = get_portfolio_strategy(strategy_key)
     schedule = strategy.build_schedule(hourly)
     schedule = schedule[schedule.index <= development_end]
     result = PortfolioEngineV4().run(
@@ -47,6 +45,7 @@ def run(db: Path, output: Path):
         "holdout_evaluated": False,
         "development_end": development_end.isoformat(),
         "reserved_holdout_start": common[cutoff_position].isoformat(),
+        "strategy_key": strategy_key,
         "strategy": result["strategy"],
         "schedule_rows": len(schedule),
         "metrics": result["metrics"],
@@ -67,8 +66,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--strategy", required=True)
     args = parser.parse_args()
-    result = run(Path(args.db), Path(args.output))
+
+    result = run(Path(args.db), Path(args.output), args.strategy)
+    print("strategy:", result["strategy_key"])
     print("schedule_rows:", result["schedule_rows"])
     print(json.dumps(result["metrics"], indent=2))
     print("output:", args.output)
