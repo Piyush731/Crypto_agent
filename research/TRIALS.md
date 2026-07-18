@@ -18,3 +18,12 @@
 - Confidence threshold: 0.50
 - Execution assumptions: inherited from `ExecutionPolicy`
 - Final holdout: must remain untouched until development gates pass
+
+## V4-T3 — Registered, not yet evaluated
+
+- Strategy plugin: `trend_alignment_5m` v1
+- Type: deterministic completed-candle 5m/15m/1h trend alignment
+- Entry: fresh transition only; no repeated signal every bar
+- Exit policy: 2 ATR stop, 4 ATR target, 96-bar maximum
+- Risk/cost policy: shared `ExecutionPolicy`
+- Final holdout: untouched

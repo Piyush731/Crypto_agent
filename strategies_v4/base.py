@@ -58,6 +58,13 @@ class StrategyPlugin(ABC):
         """Return columns `direction` (-1/0/1) and `confidence`."""
         raise NotImplementedError
 
+    def features_to_signals(
+        self,
+        features: pd.DataFrame,
+    ) -> pd.DataFrame | None:
+        """Optional deterministic signal path for rule-based strategies."""
+        return None
+
     def metadata(self) -> dict[str, Any]:
         return {
             "strategy_id": self.strategy_id,
