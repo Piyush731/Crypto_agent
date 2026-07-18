@@ -35,3 +35,4 @@ saved_models/
 *.pem
 temp.txt
 oldconfig.txt
+nohup.out
