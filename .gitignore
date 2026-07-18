@@ -36,3 +36,7 @@ saved_models/
 temp.txt
 oldconfig.txt
 nohup.out
+
+market_data.db
+market_data.db-shm
+market_data.db-wal
