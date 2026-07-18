@@ -40,7 +40,7 @@
   - PF 1.0518; Sharpe 0.4924; max DD -9.5719%
 - Failed normal-cost and stressed-cost gates. Holdout was not evaluated.
 
-## V4-T9 — Pre-registered; no result viewed
+## V4-T9 — Rejected; holdout untouched
 
 ### Hypothesis
 A broader liquid universe plus slower dual-horizon trend ranking and a rank
@@ -101,3 +101,71 @@ All must pass:
 Only if every gate passes may the frozen strategy be evaluated once on the final
 holdout. A target such as +40% or +50% is aspirational and is not an acceptance
 substitute; a lower-return robust strategy outranks a larger fragile backtest.
+
+### Development result and decision
+- Return +7.9723%; net P&L +797.23; CAGR 5.1811%.
+- PF 1.1089; Sharpe 0.5518; max DD -10.9748%.
+- 47.37% profitable months; short side -196.39.
+- Only 3/10 symbols positive; DOGE supplied about 58% of positive-symbol P&L.
+- 1.5x cost PF 1.0504; 2.0x costs -32.55, PF 0.9959.
+- Failed PF, Sharpe, monthly consistency, side, breadth, concentration and cost
+  gates. Rejected. No parameter rescue and no holdout evaluation.
+
+## V4-T10 — Pre-registered; no result viewed
+
+### Hypothesis
+A broad-market regime gate can avoid structurally wrong-direction positions,
+while two-leg directional diversification, slow ranking retention, causal ATR
+trailing stops and portfolio drawdown throttling can improve net robustness. This
+is a new strategy family; V4-T9 parameters are not modified or rescued.
+
+### Frozen universe and timing
+- Exactly: `BTC, ETH, SOL, BNB, XRP, DOGE, ADA, LINK, LTC, AVAX` OKX swaps.
+- All ten passed the pre-registered data eligibility audit.
+- Completed 1h inputs; schedule at 00:00 and 12:00 UTC (12h rebalance).
+- Fill at first common 5m open strictly after signal availability.
+- Same first-80% development and untouched final-20% holdout split.
+
+### Frozen regime layer
+- BTC 30-day EMA uses 720 completed hourly closes.
+- Breadth is the fraction of all ten symbols with positive 720h return.
+- Bull: BTC above its 30-day EMA and breadth >= 60%.
+- Bear: BTC below its 30-day EMA and breadth <= 40%.
+- Mixed: all other states; target is cash with no active directional positions.
+
+### Frozen selection and retention layer
+- Score = `(50% x 168h return + 50% x 720h return) / 720h hourly volatility`.
+- Bull target: two highest-score symbols whose weighted raw return is positive.
+- Bear target: two lowest-score symbols whose weighted raw return is negative.
+- Retain incumbent bull legs while in top 4 with positive raw return.
+- Retain incumbent bear legs while in bottom 4 with negative raw return.
+- Fill vacant target slots from the current score extremes. No symbol exclusions.
+
+### Frozen execution, stops and costs
+- Starting shared capital: 10,000 USDT.
+- Risk per leg: 0.50%; maximum two legs; planned total risk <= 1.00%.
+- Maximum notional per leg: 30%; maximum gross notional: 60%.
+- Initial stop: 2.0 x completed-1h ATR(14).
+- Arm trailing after favorable movement of 2.0 x entry ATR.
+- Once armed, trail 2.0 x entry ATR from the best favorable price.
+- A trailing update becomes active on the next 5m bar, avoiding unknown intrabar
+  high/low ordering.
+- Fee 5 bps/side; slippage 2 bps/side; half-spread 1 bp/side.
+- Funding model 1 bp per 8h, unchanged from prior comparisons.
+
+### Frozen portfolio protection
+- Drawdown is measured from peak marked equity at a rebalance.
+- Above -7.5%: normal risk for new positions.
+- At or below -7.5%: half risk for new positions.
+- At or below -12.5%: no new positions; existing stops/regime exits remain live.
+- Normal or half risk resumes automatically only when marked drawdown moves back
+  above the corresponding fixed threshold.
+
+### Search budget and acceptance
+- Exactly one V4-T10 parameterization. No alternate EMA, breadth, rebalance,
+  retention, stop, trailing, risk or regime variants on this sample.
+- Required: net return > 0, PF >= 1.20, Sharpe >= 1.00, max DD <= 20%, at least
+  60% profitable months, bull and bear trade P&L both non-negative, at least 60%
+  traded symbols non-negative, no symbol above 35% of positive-symbol P&L,
+  1.5x-cost PF >= 1.10, and 2.0x-cost net result >= 0.
+- Only an all-gates pass permits one final holdout evaluation.

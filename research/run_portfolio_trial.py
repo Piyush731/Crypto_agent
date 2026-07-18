@@ -6,6 +6,7 @@ from pathlib import Path
 
 from core.market_store import MarketStore
 from portfolio_v4.registry import get_portfolio_strategy
+from trading.layered_portfolio_engine_v4 import LayeredPortfolioEngineV4
 from trading.portfolio_engine_v4 import PortfolioEngineV4
 
 
@@ -45,7 +46,12 @@ def run(db: Path, output: Path, strategy_key: str):
 
     schedule = strategy.build_schedule(hourly)
     schedule = schedule[schedule.index <= development_end]
-    result = PortfolioEngineV4().run(
+    engine = (
+        LayeredPortfolioEngineV4()
+        if getattr(strategy, "engine_type", None) == "layered_multi_leg_v1"
+        else PortfolioEngineV4()
+    )
+    result = engine.run(
         five_minute, schedule, strategy, development_end
     )
 

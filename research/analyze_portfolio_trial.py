@@ -75,6 +75,8 @@ def analyze(path: Path):
     monthly_net = [row["net_pnl"] for row in monthly]
     symbol_rows = grouped(frame, "symbol")
     direction_rows = grouped(frame, "side")
+    regime_rows = grouped(frame, "entry_regime") if "entry_regime" in frame else []
+    exit_reason_rows = grouped(frame, "exit_reason") if "exit_reason" in frame else []
 
     return {
         "source": str(path),
@@ -95,6 +97,8 @@ def analyze(path: Path):
         ],
         "by_symbol": symbol_rows,
         "by_direction": direction_rows,
+        "by_entry_regime": regime_rows,
+        "by_exit_reason": exit_reason_rows,
         "by_quarter": grouped(frame, "quarter"),
         "by_month": monthly,
     }
@@ -115,7 +119,8 @@ def main():
         "period_start", "period_end", "years", "cagr_pct",
         "gross_pnl", "fees", "funding", "net_pnl",
         "profitable_months_pct", "best_month_pnl", "worst_month_pnl",
-        "cost_scenarios", "by_symbol", "by_direction", "by_quarter",
+        "cost_scenarios", "by_symbol", "by_direction", "by_entry_regime",
+        "by_exit_reason", "by_quarter",
     ]}, indent=2))
     print("output:", output)
 
