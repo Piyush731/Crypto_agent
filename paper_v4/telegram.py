@@ -13,8 +13,9 @@ PREFIX = "🧪 CRYPTO V7 EXPERIMENTAL PAPER\nNO REAL ORDERS\n"
 
 
 class TelegramNotifier:
-    def __init__(self, store: PaperStore):
+    def __init__(self, store: PaperStore, prefix: str = PREFIX):
         self.store = store
+        self.prefix = prefix
         self.token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
         self.chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
@@ -32,7 +33,7 @@ class TelegramNotifier:
                     url,
                     json={
                         "chat_id": self.chat_id,
-                        "text": PREFIX + row["message"],
+                        "text": self.prefix + row["message"],
                         "disable_web_page_preview": True,
                     },
                     timeout=20,

@@ -259,3 +259,24 @@ is a new strategy family; V4-T9 parameters are not modified or rescued.
   at least three of four windows positive including 2024H1, and the signs of
   long/short P&L to be reported without post-result removal.
 - Regardless of outcome, no recent period or final holdout is evaluated by T12.
+
+### V4-T12 result
+- Binance Vision frozen cross-venue validation: +27.9620% (+2,796.20), CAGR
+  7.7936%, PF 1.4207, Sharpe 0.5935, max marked DD -20.5175%.
+- 1.5x costs +2,394.14 (PF 1.3499); 2.0x costs +1,992.08 (PF 1.2830).
+- Three of four windows positive including 2024H1; 2022 negative.
+- Long +3,449.90; short -653.70; six of nine symbols non-negative.
+- Cross-venue trend portability supported, but rejected T11 is not rescued:
+  Sharpe, drawdown and short-side consistency remain insufficient.
+
+## FWD-HR1 — Frozen aggressive forward-only paper observation
+- Not a historical trial and not validation. It may not evaluate any past fills.
+- Signals are frozen T11 weekly 7d/30d/90d voting on nine OKX swaps.
+- Fresh isolated 10,000 USDT paper ledger and separate market database.
+- Risk 0.20% per leg, maximum six legs, maximum 15% notional per leg and 75%
+  gross notional. Initial stop 3 x ATR; no take profit.
+- Permanent paper halt at 25% marked-equity drawdown; no automatic reset.
+- Public OKX data only, no private client and `ALLOW_REAL_ORDERS=false` mandatory.
+- Performance begins only after runtime initialization; historical data is
+  indicator warm-up and no retrospective fill may be imported.
+- Telegram messages must identify `HIGH-RISK FORWARD PAPER — NOT VALIDATED`.

@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 !.env.v4.example
+!.env.t12-forward.example
 *.env
 .venv/
 venv/
@@ -49,9 +50,3 @@ PROJECT_PROMPT.md
 contextPrompt.txt
 oldconfig.txt
 temp.txt
-
-logs/
-
-*.db.sha256
-
-research_artifacts/
