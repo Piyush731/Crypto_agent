@@ -111,7 +111,7 @@ substitute; a lower-return robust strategy outranks a larger fragile backtest.
 - Failed PF, Sharpe, monthly consistency, side, breadth, concentration and cost
   gates. Rejected. No parameter rescue and no holdout evaluation.
 
-## V4-T10 — Pre-registered; no result viewed
+## V4-T10 — Rejected; holdout untouched
 
 ### Hypothesis
 A broad-market regime gate can avoid structurally wrong-direction positions,
@@ -169,3 +169,58 @@ is a new strategy family; V4-T9 parameters are not modified or rescued.
   traded symbols non-negative, no symbol above 35% of positive-symbol P&L,
   1.5x-cost PF >= 1.10, and 2.0x-cost net result >= 0.
 - Only an all-gates pass permits one final holdout evaluation.
+
+### Development result and decision
+- Gross P&L -898.65; net P&L -1,240.90; PF 0.6567.
+- Both bull (-648.86 net) and bear (-592.04 net) regimes lost.
+- Initial stops lost -3,430.85 net; trailing exits gained +2,076.93 net.
+- The -12.5% protection threshold stopped new entries in December 2024; the
+  analyzer's last-trade period was shorter than the full processed timeline.
+- Gross expectancy was negative, so costs and risk scaling cannot rescue it.
+- Rejected without parameter changes and without holdout evaluation.
+
+## V4-T11 — Pre-registered; no result viewed
+
+### Independent corpus and universe
+- Older data interval: 2021-01-01 00:00 through 2024-07-17 23:55 UTC.
+- Recent 2024-07-18 onward data must not be loaded by the T11 runner.
+- Eligible after the frozen 95% timestamp-coverage audit:
+  `BTC, ETH, SOL, XRP, DOGE, ADA, LINK, LTC, AVAX`.
+- BNB is excluded only because older-period 5m/1h coverage was 44.26% after its
+  December 2022 listing. No return or P&L information was used for exclusion.
+
+### Frozen signal and selection
+- Completed 1h candles; weekly schedule Monday 00:00 UTC.
+- Independent horizons: 168h, 720h and 2160h returns.
+- Long if at least two horizon returns are positive; short if at least two are
+  negative; otherwise no position for that instrument.
+- Strength is the absolute mean of each horizon return divided by 720h hourly
+  volatility and the square root of its own horizon.
+- If more than six instruments signal, select the six greatest absolute
+  strengths, with symbol name as deterministic tie-breaker.
+
+### Frozen sizing, execution and costs
+- Starting shared capital 10,000 USDT.
+- Maximum six positions; risk 0.10% equity per leg; planned total <= 0.60%.
+- Maximum notional 10% per leg and maximum gross notional 60%.
+- Initial stop 3.0 x completed-1h ATR(14); no trailing stop and no take profit.
+- Same-direction positions persist until weekly signal removal/reversal or stop.
+- Fill at first common 5m open strictly after signal availability.
+- Fee 5 bps/side, slippage 2 bps/side, half-spread 1 bp/side and funding model
+  1 bp per 8h.
+
+### Frozen date bounds and walk-forward reporting
+- Feature warm-up starts 2021-01-01; full evaluation starts 2021-04-05.
+- Full independent evaluation ends 2024-07-17 23:55.
+- Reset-capital reporting windows: 2021-04-05--2021-12-31, calendar 2022,
+  calendar 2023, and 2024-01-01--2024-07-17.
+- Recent period and final holdout flags must both remain false.
+
+### Search budget and acceptance
+- Exactly one parameterization; no alternate horizons, weekday, position count,
+  risk, stop or selection variants on this corpus.
+- Full independent result requires net return > 0, PF >= 1.20, Sharpe >= 1.00,
+  max DD <= 20%, long and short net P&L both positive, at least 60% traded
+  symbols non-negative, 1.5x-cost PF >= 1.10 and 2.0x-cost net result >= 0.
+- At least three of four reset-capital windows must be net positive, including
+  the 2024H1 window. Failure rejects T11 without examining recent/final periods.

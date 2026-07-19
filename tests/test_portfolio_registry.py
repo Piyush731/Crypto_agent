@@ -7,6 +7,7 @@ def test_portfolio_trials_are_pre_registered():
         "cross_sectional_momentum_8h_v1",
         "cost_aware_dual_trend_8h_v1",
         "layered_regime_trend_12h_v1",
+        "time_series_momentum_weekly_v1",
     }
     assert (
         get_portfolio_strategy("cross_sectional_momentum_8h_v1")
@@ -20,3 +21,7 @@ def test_portfolio_trials_are_pre_registered():
     assert t10.config.rebalance_hours == 12
     assert t10.config.risk_per_leg_pct == 0.50
     assert t10.engine_type == "layered_multi_leg_v1"
+    t11 = get_portfolio_strategy("time_series_momentum_weekly_v1")
+    assert len(t11.candidate_symbols) == 9
+    assert t11.config.maximum_positions == 6
+    assert t11.engine_type == "time_series_multi_leg_v1"
