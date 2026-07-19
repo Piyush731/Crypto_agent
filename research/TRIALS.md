@@ -179,7 +179,7 @@ is a new strategy family; V4-T9 parameters are not modified or rescued.
 - Gross expectancy was negative, so costs and risk scaling cannot rescue it.
 - Rejected without parameter changes and without holdout evaluation.
 
-## V4-T11 — Pre-registered; no result viewed
+## V4-T11 — Rejected; recent and final periods untouched
 
 ### Independent corpus and universe
 - Older data interval: 2021-01-01 00:00 through 2024-07-17 23:55 UTC.
@@ -224,3 +224,38 @@ is a new strategy family; V4-T9 parameters are not modified or rescued.
   symbols non-negative, 1.5x-cost PF >= 1.10 and 2.0x-cost net result >= 0.
 - At least three of four reset-capital windows must be net positive, including
   the 2024H1 window. Failure rejects T11 without examining recent/final periods.
+
+### Independent result and decision
+- Full net +1,198.35 (+11.9835%) over about 3.23 years; CAGR 3.5685%.
+- PF 1.2069; Sharpe 0.4394; max DD -12.9827%.
+- 1.5x costs +843.98, PF 1.1415; 2.0x costs +489.62, PF 1.0798.
+- Three of four windows positive, including 2024H1 (+78.02); 2022 negative.
+- Long +1,939.95; short -741.60; only five of nine symbols non-negative.
+- Failed Sharpe, short-side and symbol-breadth gates. Rejected without parameter
+  changes. Recent period and final holdout remain untouched.
+
+## V4-T12 — Pre-registered cross-venue validation; no result viewed
+
+### Purpose and non-rescue rule
+- Validate the frozen V4-T11 implementation on Binance Vision USD-M public
+  archives. This is venue portability evidence, not a parameter search and
+  cannot retroactively convert rejected T11 into an approved strategy.
+- Every strategy, risk, cost, stop, universe and date parameter remains exactly
+  equal to V4-T11. `strategy_parameters_changed` must be false.
+
+### Isolated data
+- New local SQLite DB: `t12_binance_crossvenue.db`; provider key
+  `binance_vision`; instrument IDs use `SYMBOLUSDT`.
+- Public monthly USD-M 5m archives only. Derived 1h candles require exactly 12
+  completed 5m bars. No Oracle storage and no authenticated Binance API.
+- Frozen interval remains 2021-01-01 through 2024-07-17; recent/final flags false.
+- All nine symbols require >=95% 5m and 1h timestamp coverage. If fewer than all
+  nine pass, T12 is not run; symbols may not be removed based on return or P&L.
+
+### Validation decision
+- Report the same full metrics, four reset-capital windows, directions, symbols
+  and 1.5x/2.0x cost stress as T11.
+- Cross-venue support requires full net positive, PF >=1.20, 2.0x costs positive,
+  at least three of four windows positive including 2024H1, and the signs of
+  long/short P&L to be reported without post-result removal.
+- Regardless of outcome, no recent period or final holdout is evaluated by T12.
